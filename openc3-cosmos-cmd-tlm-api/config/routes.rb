@@ -147,9 +147,9 @@ Rails.application.routes.draw do
     match '/notes/:id', to: 'notes#update', id: /[^\/]+/, via: [:patch, :put]
     delete '/notes/:id', to: 'notes#destroy', id: /[^\/]+/
 
-    # 쪽지(내부 메시지) 시스템 - 이메일 포워딩 데몬 연동
+    # 쪽지 시스템 - 외부 클라이언트가 관제사에게 문의를 남기는 공개 채널
     get    '/mailbox',     to: 'mailbox#index'
-    post   '/mailbox',     to: 'mailbox#create'   # 인증 없음 (내부 데몬 전용)
+    post   '/mailbox',     to: 'mailbox#create'   # 인증 없음 (외부 공개 제출용)
     get    '/mailbox/:id', to: 'mailbox#show',    id: /[^\/]+/
     delete '/mailbox/:id', to: 'mailbox#destroy', id: /[^\/]+/
 

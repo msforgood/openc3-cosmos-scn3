@@ -4,7 +4,7 @@ require 'openc3/models/model'
 require 'openc3/utilities/store'
 
 module OpenC3
-  # 쪽지(내부 메시지) 모델 - 이메일 포워딩 데몬이 생성하고 관제사 봇이 열람함
+  # 쪽지(내부 메시지) 모델 - 외부 클라이언트가 공개 API로 생성하고 관제사 봇이 열람함
   class MailboxModel < Model
     MAILBOX_TYPE = 'mailbox'.freeze
     PRIMARY_KEY  = '__MAILBOX'.freeze

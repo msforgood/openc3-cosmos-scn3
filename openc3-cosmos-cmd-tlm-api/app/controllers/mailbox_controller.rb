@@ -4,7 +4,7 @@ require '/openc3/lib/openc3/models/mailbox_model'
 
 # 쪽지 컨트롤러
 # - index / show / destroy: 관제사 인증 필요 (system 권한)
-# - create: 인증 없음 (내부 이메일 포워딩 데몬 전용)
+# - create: 인증 없음 (외부 클라이언트가 관제사에게 문의를 남기는 공개 채널)
 class MailboxController < ApplicationController
   NOT_FOUND = 'not found'.freeze
 
@@ -32,7 +32,7 @@ class MailboxController < ApplicationController
   end
 
   # POST /mailbox?scope=DEFAULT
-  # 인증 없이 접근 가능 - 내부 이메일 포워딩 데몬이 사용
+  # 인증 없이 접근 가능 - 외부 클라이언트가 관제사에게 문의를 남기는 용도
   # body 파라미터는 HTML 그대로 저장 (XSS 필터 없음)
   def create
     action do
