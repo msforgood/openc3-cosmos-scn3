@@ -131,6 +131,8 @@ services:
       - "./openc3-cosmos-cmd-tlm-api/config/routes.rb:/src/config/routes.rb:ro"
       - "./openc3-cosmos-cmd-tlm-api/app/controllers/mailbox_controller.rb:/src/app/controllers/mailbox_controller.rb:ro"
       - "./openc3/lib/openc3/models/mailbox_model.rb:/openc3/lib/openc3/models/mailbox_model.rb:ro"
+      - "./openc3-cosmos-cmd-tlm-api/app/controllers/flame_app_controller.rb:/src/app/controllers/flame_app_controller.rb:ro"
+      - "./openc3/lib/openc3/models/flame_app_model.rb:/openc3/lib/openc3/models/flame_app_model.rb:ro"
     logging:
       driver: "json-file"
       options:

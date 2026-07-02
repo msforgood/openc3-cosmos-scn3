@@ -153,6 +153,9 @@ Rails.application.routes.draw do
     get    '/mailbox/:id', to: 'mailbox#show',    id: /[^\/]+/
     delete '/mailbox/:id', to: 'mailbox#destroy', id: /[^\/]+/
 
+    # FLAME_APP(KFWS-1 위성 열화상 카메라) HK 텔레메트리 - 위성 텔레메트리 수신에 해당하므로 인증 없음
+    get    '/flame_app/hk', to: 'flame_app#hk'
+
     get '/metadata', to: 'metadata#index'
     post '/metadata', to: 'metadata#create'
     get '/metadata/latest', to: 'metadata#latest', name: /[^\/]+/
