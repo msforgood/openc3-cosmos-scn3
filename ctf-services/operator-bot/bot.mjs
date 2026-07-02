@@ -27,11 +27,16 @@ async function loginToOpenC3(page) {
   // OpenC3 로그인 폼 처리 (기본 인증 또는 Keycloak SSO)
   try {
     // 기본 COSMOS Core 로그인 (비밀번호 입력 방식)
-    const passInput = page.locator('input[type="password"]')
-    await passInput.waitFor({ timeout: 5000 })
-    await passInput.fill(BOT_PASSWORD)
-    await page.keyboard.press('Enter')
-    await page.waitForURL(`${OPENC3_URL}/**`, { timeout: 15000 })
+    // 주의: 로그인 페이지는 /auth/token-exists 응답이 오기 전까지 잠깐
+    // "비밀번호 생성"(New/Confirm Password) 폼을 렌더링하는 레이스가 있어,
+    // password input 개수만으로 판단하면 안 되고 실제 Login 버튼을 기다려야 함.
+    const loginButton = page.getByRole('button', { name: 'Login', exact: true })
+    await loginButton.waitFor({ timeout: 15000 })
+    await page.locator('input[type="password"]').last().fill(BOT_PASSWORD)
+    await loginButton.click()
+    // 문자열 glob('/**')은 현재 /login 페이지 자체도 매칭해버려 로그인 성공을
+    // 확인하지 못하므로, /login을 벗어났는지로 판단하는 predicate를 사용
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15000 })
     console.log('[BOT] 로그인 성공')
   } catch {
     // Keycloak 또는 다른 SSO 방식 시도
@@ -39,7 +44,9 @@ async function loginToOpenC3(page) {
       await page.fill('#username', BOT_USERNAME)
       await page.fill('#password', BOT_PASSWORD)
       await page.click('input[type="submit"]')
-      await page.waitForURL(`${OPENC3_URL}/**`, { timeout: 15000 })
+      // 문자열 glob('/**')은 현재 /login 페이지 자체도 매칭해버려 로그인 성공을
+    // 확인하지 못하므로, /login을 벗어났는지로 판단하는 predicate를 사용
+    await page.waitForURL((url) => !url.pathname.includes('/login'), { timeout: 15000 })
       console.log('[BOT] SSO 로그인 성공')
     } catch (e) {
       console.error('[BOT] 로그인 실패:', e.message)
@@ -55,18 +62,22 @@ async function readMailbox(page) {
   await page.goto(mailboxUrl, { waitUntil: 'networkidle', timeout: 30000 })
 
   // 메시지 목록 로드 대기
+  // 주의: .v-list-item 은 좌측 내비게이션 드로어에도 쓰이는 범용 Vuetify 클래스라
+  // 실제 쪽지 목록만 가리키려면 Mailbox.vue의 전용 클래스(.mailbox-item)를 써야 함.
   try {
-    await page.waitForSelector('.v-list-item', { timeout: 10000 })
+    await page.waitForSelector('.mailbox-item', { timeout: 10000 })
   } catch {
     console.log('[BOT] 쪽지 없음 또는 목록 로드 대기 중')
     return
   }
 
-  const items = await page.locator('.v-list-item').all()
+  const items = await page.locator('.mailbox-item').all()
   console.log(`[BOT] 쪽지 ${items.length}개 발견`)
 
   for (let i = 0; i < items.length; i++) {
     try {
+      // 리스트가 길어지면 아래쪽 항목은 뷰포트 밖이라 클릭이 막히므로 먼저 스크롤
+      await items[i].scrollIntoViewIfNeeded()
       // 쪽지 클릭 → 본문 렌더링 → XSS 실행
       await items[i].click()
       console.log(`[BOT] 쪽지 #${i + 1} 열람`)
@@ -90,6 +101,7 @@ async function main() {
 
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
+    locale: 'en-US',
   })
   const page = await context.newPage()
 

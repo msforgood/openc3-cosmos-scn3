@@ -307,13 +307,18 @@ services:
     restart: "unless-stopped"
     depends_on:
       - "openc3-traefik"
+    # openc3-traefik과 네트워크 네임스페이스를 공유해 http://localhost:2900 로 접속.
+    # OpenC3의 CSP(script-src)가 localhost/host.docker.internal/*.local 만 허용하고
+    # 도커 내부 서비스명(openc3-traefik)은 허용하지 않아, 내부 hostname으로 접속하면
+    # 정적 자원 로드가 CSP에 의해 차단되어 로그인이 실패함.
+    network_mode: "service:openc3-traefik"
     logging:
       driver: "json-file"
       options:
         max-size: "5m"
         max-file: "2"
     environment:
-      OPENC3_URL:        "http://openc3-traefik:2900"
+      OPENC3_URL:        "http://localhost:2900"
       BOT_USERNAME:      "${CTF_BOT_USERNAME:-operator}"
       BOT_PASSWORD:      "${CTF_BOT_PASSWORD:-operator}"
       CHECK_INTERVAL_MS: "${CTF_BOT_CHECK_INTERVAL_MS:-60000}"

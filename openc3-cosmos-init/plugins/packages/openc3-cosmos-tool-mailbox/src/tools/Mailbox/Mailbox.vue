@@ -23,7 +23,7 @@
                 :active="selectedId === msg.id"
                 active-color="primary"
                 @click="selectMessage(msg)"
-                class="border-b"
+                class="border-b mailbox-item"
               >
                 <v-list-item-title class="font-weight-bold text-truncate">
                   {{ msg.subject }}
