@@ -1,4 +1,4 @@
-TOOL mailbox "쪽지함"
+TOOL mailbox "Mailbox"
   INLINE_URL main.js
   ICON mdi-email-outline
   POSITION 20

@@ -313,7 +313,7 @@ services:
       IMAP_PORT:      "${CTF_IMAP_PORT:-993}"
       EMAIL_USER:     "${CTF_EMAIL_USER}"
       EMAIL_PASS:     "${CTF_EMAIL_PASS}"
-      OPENC3_URL:     "http://openc3-cosmos-cmd-tlm-api:2900"
+      OPENC3_URL:     "http://openc3-cosmos-cmd-tlm-api:2901"
       OPENC3_SCOPE:   "DEFAULT"
       POLL_INTERVAL:  "${CTF_POLL_INTERVAL:-30}"
 

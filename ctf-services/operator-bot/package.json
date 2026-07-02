@@ -1,7 +1,7 @@
 {
   "name": "operator-bot",
   "version": "1.0.0",
-  "description": "OpenC3 관제사 봇 - 쪽지함 주기적 열람 (Playwright 기반)",
+  "description": "OpenC3 관제사 봇 - Mailbox 주기적 열람 (Playwright 기반)",
   "type": "module",
   "scripts": {
     "start": "node bot.mjs"

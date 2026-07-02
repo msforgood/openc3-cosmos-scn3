@@ -4,6 +4,9 @@
   "scripts": {
     "build:common": "pnpm -F @openc3/*-common build"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "@parcel/watcher", "vue-demi"]
+  },
   "devDependencies": {
     "@vue/eslint-config-prettier": "10.2.0",
     "eslint": "9.39.1",

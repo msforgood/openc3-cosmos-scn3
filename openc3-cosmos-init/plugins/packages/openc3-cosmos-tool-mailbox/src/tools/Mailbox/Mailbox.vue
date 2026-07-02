@@ -1,6 +1,6 @@
 <template>
   <div>
-    <top-bar :menus="menus" title="쪽지함" />
+    <top-bar :menus="menus" title="Mailbox" />
 
     <v-container fluid>
       <v-row>
@@ -93,13 +93,7 @@ export default {
       selected: null,
       selectedId: null,
       loading: false,
-      menus: [
-        {
-          label: '새로고침',
-          icon: 'mdi-refresh',
-          command: () => this.loadMessages(),
-        },
-      ],
+      menus: [],
     }
   },
   mounted() {
@@ -115,10 +109,8 @@ export default {
       this.loading = true
       try {
         const scope = window.openc3Scope || 'DEFAULT'
-        const token = window.openc3Token || localStorage.getItem('openc3_token') || ''
         const resp = await axios.get('/openc3-api/mailbox', {
           params: { scope },
-          headers: { Authorization: token },
         })
         this.messages = resp.data || []
         // 선택된 쪽지가 목록에 여전히 있는지 확인

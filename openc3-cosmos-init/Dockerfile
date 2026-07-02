@@ -89,7 +89,7 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-iframe"]
 COPY ./plugins/packages/openc3-cosmos-tool-handbooks/ packages/openc3-cosmos-tool-handbooks/
 RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-handbooks"]
 
-# Build mailbox tool (쪽지함)
+# Build mailbox tool (Mailbox)
 COPY ./plugins/packages/openc3-cosmos-tool-mailbox/ packages/openc3-cosmos-tool-mailbox/
 RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-mailbox"]
 

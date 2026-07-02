@@ -50,7 +50,7 @@ async function loginToOpenC3(page) {
 
 async function readMailbox(page) {
   const mailboxUrl = `${OPENC3_URL}/tools/mailbox`
-  console.log(`[BOT] 쪽지함 접속: ${mailboxUrl}`)
+  console.log(`[BOT] Mailbox 접속: ${mailboxUrl}`)
 
   await page.goto(mailboxUrl, { waitUntil: 'networkidle', timeout: 30000 })
 
@@ -107,7 +107,7 @@ async function main() {
     console.error('[BOT] 초기 로그인 실패, 재시도 예정:', e.message)
   }
 
-  // 주기적 쪽지함 열람
+  // 주기적 Mailbox 열람
   while (true) {
     try {
       // 세션 만료 확인: 현재 URL이 로그인 페이지면 재로그인

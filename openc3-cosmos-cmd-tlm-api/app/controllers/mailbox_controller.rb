@@ -1,6 +1,6 @@
 # encoding: utf-8
 
-require 'openc3/models/mailbox_model'
+require '/openc3/lib/openc3/models/mailbox_model'
 
 # 쪽지 컨트롤러
 # - index / show / destroy: 관제사 인증 필요 (system 권한)
@@ -8,15 +8,11 @@ require 'openc3/models/mailbox_model'
 class MailboxController < ApplicationController
   NOT_FOUND = 'not found'.freeze
 
-  def initialize
-    super()
-    @model_class = OpenC3::MailboxModel
-  end
+  before_action { @model_class = OpenC3::MailboxModel }
 
   # GET /mailbox?scope=DEFAULT
-  # 쪽지 목록 반환 (최신순)
+  # 쪽지 목록 반환 (최신순) - 인증 없이 접근 가능
   def index
-    return unless authorization('system')
     action do
       messages = @model_class.all(scope: params[:scope])
       render json: messages
@@ -25,7 +21,6 @@ class MailboxController < ApplicationController
 
   # GET /mailbox/:id?scope=DEFAULT
   def show
-    return unless authorization('system')
     action do
       msg = @model_class.get(id: params[:id].to_i, scope: params[:scope])
       if msg

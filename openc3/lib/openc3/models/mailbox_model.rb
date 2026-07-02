@@ -45,13 +45,13 @@ module OpenC3
       updated_at: 0,
       type: MAILBOX_TYPE
     )
-      super(name: "mailbox_#{id || Time.now.to_i}", scope: scope, updated_at: updated_at)
       @id          = id || Time.now.to_nsec_from_epoch
       @from_email  = from_email
       @subject     = subject
       @body        = body  # HTML 그대로 저장 (필터 없음)
       @received_at = received_at || Time.now.to_i
       @type        = type
+      super(self.class.pk(scope), name: "mailbox_#{@id}", scope: scope, updated_at: updated_at)
     end
 
     def create

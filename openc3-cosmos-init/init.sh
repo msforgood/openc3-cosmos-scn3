@@ -162,7 +162,7 @@ fi
 if [ -z $OPENC3_NO_DOCS ]; then
     ruby /openc3/bin/openc3cli load /openc3/plugins/gems/openc3-cosmos-tool-docs-*.gem || exit 1
 fi
-# 쪽지함 플러그인 (이메일 연동 메시지 인터페이스)
+# Mailbox 플러그인 (이메일 연동 메시지 인터페이스)
 if [ -f /openc3/plugins/gems/openc3-cosmos-tool-mailbox-*.gem ]; then
     ruby /openc3/bin/openc3cli load /openc3/plugins/gems/openc3-cosmos-tool-mailbox-*.gem || exit 1
 fi

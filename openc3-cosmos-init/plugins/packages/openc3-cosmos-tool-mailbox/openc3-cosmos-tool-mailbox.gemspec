@@ -2,7 +2,7 @@
 
 spec = Gem::Specification.new do |s|
   s.name = 'openc3-cosmos-tool-mailbox'
-  s.summary = 'OpenC3 COSMOS 쪽지함 Tool'
+  s.summary = 'OpenC3 COSMOS Mailbox Tool'
   s.description = <<-EOF
     이메일 연동 쪽지(내부 메시지) 인터페이스 플러그인
   EOF
