@@ -128,6 +128,9 @@ services:
       - "./plugins:/plugins:z"
       - "./cacert.pem:/devel/cacert.pem:z"
       - "./ctf-services/flag.txt:/flag.txt:ro"
+      - "./openc3-cosmos-cmd-tlm-api/config/routes.rb:/src/config/routes.rb:ro"
+      - "./openc3-cosmos-cmd-tlm-api/app/controllers/mailbox_controller.rb:/src/app/controllers/mailbox_controller.rb:ro"
+      - "./openc3/lib/openc3/models/mailbox_model.rb:/openc3/lib/openc3/models/mailbox_model.rb:ro"
     logging:
       driver: "json-file"
       options:
