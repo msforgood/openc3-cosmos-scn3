@@ -1,0 +1,12 @@
+# pnpm store cache (대용량 캐시, 로컬 전용)
+.pnpm-store/
+
+# Vite 빌드 아티팩트 (gem에 포함되지만 소스가 아님)
+packages/openc3-cosmos-tool-mailbox/tools/
+
+# 빌드된 gem 파일
+packages/openc3-cosmos-tool-mailbox/*.gem
+
+# node_modules
+node_modules/
+packages/*/node_modules/

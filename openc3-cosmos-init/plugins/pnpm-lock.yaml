@@ -490,6 +490,34 @@ importers:
         specifier: 3.5.25
         version: 3.5.25
 
+  packages/openc3-cosmos-tool-mailbox:
+    dependencies:
+      '@openc3/js-common':
+        specifier: workspace:*
+        version: link:../openc3-js-common
+      '@openc3/vue-common':
+        specifier: workspace:*
+        version: link:../openc3-vue-common
+      axios:
+        specifier: 1.13.2
+        version: 1.13.2
+      single-spa-vue:
+        specifier: 3.0.1
+        version: 3.0.1
+    devDependencies:
+      '@vitejs/plugin-vue':
+        specifier: 5.2.3
+        version: 5.2.3(vite@6.4.1(sass@1.94.2))(vue@3.5.25)
+      sass:
+        specifier: 1.94.2
+        version: 1.94.2
+      vite:
+        specifier: 6.4.1
+        version: 6.4.1(sass@1.94.2)
+      vue:
+        specifier: 3.5.25
+        version: 3.5.25
+
   packages/openc3-cosmos-tool-packetviewer:
     dependencies:
       '@astrouxds/astro-web-components':
