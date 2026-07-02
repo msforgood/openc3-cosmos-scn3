@@ -1,0 +1,24 @@
+{
+  "name": "@openc3/cosmos-tool-mailbox",
+  "version": "6.10.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "serve": "vite build --watch --mode dev-server",
+    "build": "vite build",
+    "lint": "eslint src",
+    "serve:standalone": "vite preview --mode standalone"
+  },
+  "dependencies": {
+    "@openc3/js-common": "workspace:*",
+    "@openc3/vue-common": "workspace:*",
+    "axios": "1.13.2",
+    "single-spa-vue": "3.0.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "5.2.3",
+    "sass": "1.94.2",
+    "vite": "6.4.1",
+    "vue": "3.5.25"
+  }
+}

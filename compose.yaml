@@ -127,6 +127,7 @@ services:
       - "openc3-gems-v:/gems"
       - "./plugins:/plugins:z"
       - "./cacert.pem:/devel/cacert.pem:z"
+      - "./ctf-services/flag.txt:/flag.txt:ro"
     logging:
       driver: "json-file"
       options:
@@ -288,6 +289,55 @@ services:
       - OPENC3_SR_BUCKET_PASSWORD=${OPENC3_SR_BUCKET_PASSWORD}
     env_file:
       - .env
+
+  # ──────────────────────────────────────────────────────────────
+  # CTF 서비스: 이메일 포워딩 데몬 (Gmail → OpenC3 쪽지)
+  # ──────────────────────────────────────────────────────────────
+  ctf-email-daemon:
+    build:
+      context: ./ctf-services/email-daemon
+      dockerfile: Dockerfile
+    restart: "unless-stopped"
+    depends_on:
+      - "openc3-cosmos-cmd-tlm-api"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    environment:
+      IMAP_HOST:      "${CTF_IMAP_HOST:-imap.gmail.com}"
+      IMAP_PORT:      "${CTF_IMAP_PORT:-993}"
+      EMAIL_USER:     "${CTF_EMAIL_USER}"
+      EMAIL_PASS:     "${CTF_EMAIL_PASS}"
+      OPENC3_URL:     "http://openc3-cosmos-cmd-tlm-api:2900"
+      OPENC3_SCOPE:   "DEFAULT"
+      POLL_INTERVAL:  "${CTF_POLL_INTERVAL:-30}"
+
+  # ──────────────────────────────────────────────────────────────
+  # CTF 서비스: 관제사 봇 (Playwright - 실제 브라우저로 쪽지 열람)
+  # Python/curl 스크립트 불가 - 브라우저 JS 실행이 필요한 이유:
+  #   XSS 페이로드는 브라우저 컨텍스트에서만 실행됨
+  # ──────────────────────────────────────────────────────────────
+  ctf-operator-bot:
+    build:
+      context: ./ctf-services/operator-bot
+      dockerfile: Dockerfile
+    restart: "unless-stopped"
+    depends_on:
+      - "openc3-traefik"
+      - "ctf-email-daemon"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
+    environment:
+      OPENC3_URL:        "http://openc3-traefik:2900"
+      BOT_USERNAME:      "${CTF_BOT_USERNAME:-operator}"
+      BOT_PASSWORD:      "${CTF_BOT_PASSWORD:-operator}"
+      CHECK_INTERVAL_MS: "${CTF_BOT_CHECK_INTERVAL_MS:-60000}"
+    shm_size: '256mb'
 
 volumes:
   # openc3-tsdb-v: {}

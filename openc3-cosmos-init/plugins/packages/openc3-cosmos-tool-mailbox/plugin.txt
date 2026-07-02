@@ -1,0 +1,5 @@
+TOOL mailbox "쪽지함"
+  INLINE_URL main.js
+  ICON mdi-email-outline
+  POSITION 20
+  CATEGORY Utilities

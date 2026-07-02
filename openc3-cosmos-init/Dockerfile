@@ -24,6 +24,7 @@ COPY ./plugins/packages/openc3-cosmos-tool-dataextractor/*.json packages/openc3-
 COPY ./plugins/packages/openc3-cosmos-tool-dataviewer/*.json packages/openc3-cosmos-tool-dataviewer/
 COPY ./plugins/packages/openc3-cosmos-tool-iframe/*.json packages/openc3-cosmos-tool-iframe/
 COPY ./plugins/packages/openc3-cosmos-tool-handbooks/*.json packages/openc3-cosmos-tool-handbooks/
+COPY ./plugins/packages/openc3-cosmos-tool-mailbox/*.json packages/openc3-cosmos-tool-mailbox/
 COPY ./plugins/packages/openc3-cosmos-tool-limitsmonitor/*.json packages/openc3-cosmos-tool-limitsmonitor/
 COPY ./plugins/packages/openc3-cosmos-tool-packetviewer/*.json packages/openc3-cosmos-tool-packetviewer/
 COPY ./plugins/packages/openc3-cosmos-tool-scriptrunner/*.json packages/openc3-cosmos-tool-scriptrunner/
@@ -87,6 +88,10 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-iframe"]
 # Build handbooks tool
 COPY ./plugins/packages/openc3-cosmos-tool-handbooks/ packages/openc3-cosmos-tool-handbooks/
 RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-handbooks"]
+
+# Build mailbox tool (쪽지함)
+COPY ./plugins/packages/openc3-cosmos-tool-mailbox/ packages/openc3-cosmos-tool-mailbox/
+RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-mailbox"]
 
 # Build limitsmonitor tool
 COPY ./plugins/packages/openc3-cosmos-tool-limitsmonitor/ packages/openc3-cosmos-tool-limitsmonitor/
