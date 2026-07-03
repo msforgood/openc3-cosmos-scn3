@@ -20,6 +20,7 @@
               <v-list-item
                 v-for="msg in messages"
                 :key="msg.id"
+                :data-msg-id="msg.id"
                 :active="selectedId === msg.id"
                 active-color="primary"
                 @click="selectMessage(msg)"

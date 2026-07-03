@@ -55,6 +55,10 @@ async function loginToOpenC3(page) {
   }
 }
 
+// 이미 열람한 쪽지 id 모음. 매 주기마다 전체 목록을 다시 클릭하면 비효율적이므로
+// (같은 쪽지를 10초마다 무한 재열람) 한 번 연 쪽지는 다시 열지 않도록 기억해둠.
+const readMessageIds = new Set()
+
 async function readMailbox(page) {
   const mailboxUrl = `${OPENC3_URL}/tools/mailbox`
   console.log(`[BOT] Mailbox 접속: ${mailboxUrl}`)
@@ -72,17 +76,26 @@ async function readMailbox(page) {
   }
 
   const items = await page.locator('.mailbox-item').all()
-  console.log(`[BOT] 쪽지 ${items.length}개 발견`)
+  // 각 항목은 Mailbox.vue에서 data-msg-id 속성으로 쪽지 id를 노출함
+  const unread = []
+  for (const item of items) {
+    const msgId = await item.getAttribute('data-msg-id')
+    if (msgId !== null && readMessageIds.has(msgId)) continue
+    unread.push({ item, msgId })
+  }
+  console.log(`[BOT] 쪽지 ${items.length}개 중 미확인 ${unread.length}개`)
 
-  for (let i = 0; i < items.length; i++) {
+  for (let i = 0; i < unread.length; i++) {
+    const { item, msgId } = unread[i]
     try {
       // 리스트가 길어지면 아래쪽 항목은 뷰포트 밖이라 클릭이 막히므로 먼저 스크롤
-      await items[i].scrollIntoViewIfNeeded()
+      await item.scrollIntoViewIfNeeded()
       // 쪽지 클릭 → 본문 렌더링 → XSS 실행
-      await items[i].click()
-      console.log(`[BOT] 쪽지 #${i + 1} 열람`)
+      await item.click()
+      console.log(`[BOT] 쪽지 #${i + 1} 열람 (id=${msgId})`)
       // 본문 렌더링 및 잠재적 XSS 스크립트 실행 대기
       await page.waitForTimeout(2000)
+      if (msgId !== null) readMessageIds.add(msgId)
     } catch (e) {
       console.warn(`[BOT] 쪽지 #${i + 1} 열람 실패: ${e.message}`)
     }
