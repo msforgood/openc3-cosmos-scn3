@@ -40,5 +40,6 @@ QEMU/BBB 모두 같은 11단계다.
 ## 2026-10-08 실기 검증
 
 - QEMU run `2c32d900-8603-4243-9b42-37e98ed52635`: 11/11단계 성공. MM은 펄스 앱 영역 `0xb68f1f10–0xb68f20fc`와 포인터 슬롯 `0xb68f2078`을 찾았다. 컨트롤러 모드 직접 쓰기는 `DENIED`(3)였고, 포인터 하위 바이트 `0x40→0xff` 수정으로 대상이 `0xb6a22240→0xb6a222ff`가 되었다. 컨트롤러 모드는 1→90, 오류 횟수 1, HALT ACK 수신을 확인했다. cFE ES의 종료 정리 이벤트 14와 펄스 앱 생존 상태까지 확인했다.
-- BBB run `88e82ff8-35e3-4f66-85ea-72b1e0acbf68`: baseline에서 `psp_telemetry_timeout`. BBB는 STATUS TC를 수신했고 TO_LAB는 `192.168.7.1`로 활성화되었지만, OpenC3는 BBB TM을 아직 수신하지 못했다. USB 링크의 UDP 수신 경로를 조사 중이다.
+- BBB run `88e82ff8-35e3-4f66-85ea-72b1e0acbf68`: baseline에서 `psp_telemetry_timeout`. BBB는 STATUS TC를 수신했고 TO_LAB는 `192.168.7.1:1235`로 활성화되었다. BBB의 `usb0` 패킷 캡처에는 Windows 방향 UDP 송신이 잡혔지만, Windows `192.168.7.1:1237`에 임시로 연 별도 UDP 리스너는 BBB가 보낸 시험 패킷을 받지 못했다. OpenC3의 BBB TM 수신 기록도 없다. 비행 앱이나 Runner 이전의 호스트 USB 수신 경로에서 막힌 것으로 검증되었으며, BBB 전체 절차는 아직 검증되지 않았다.
+- Windows Public 방화벽은 `BlockInbound`이고 `LocalFirewallRules N/A (GPO-store only)`로 표시된다. 범위를 BBB USB 주소/포트로 제한한 임시 인바운드 허용 규칙 제안도 자동 승인 심사에서 거절되어 적용하지 않았다. 호스트 네트워크 정책이 승인된 방법으로 수정되고 BBB TM 수신이 확인되면 TO_LAB 출력 상태를 다시 확인한 뒤 BBB Runner를 재실행해야 한다.
 - Runner UI 테스트 117/117, Scenario API 테스트 78건/390개 단언, 비행 ARM 빌드와 QEMU 실기 절차를 통과했다.
