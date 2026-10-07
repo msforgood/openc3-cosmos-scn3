@@ -32,37 +32,49 @@
   },
   {
     "schemaVersion": 1,
-    "id": "qemu-cs-crc-key-oracle",
+    "id": "qemu-tc-log-photo-traversal",
     "version": "1.0.0",
-    "name": "CS one-byte CRC key recovery",
-    "description": "Read the X-band lab key address from housekeeping, request 16 one-byte CS CRCs over TC, and reconstruct the key from fresh CS telemetry. The key is checked separately against the isolated UDP channel.",
+    "name": "QEMU TC log photo path traversal",
+    "description": "Record commands in an onboard TC log, seal and read the file, then use a camera filename containing ../ to replace that closed log with a fixed image. Ground command history remains separate.",
     "supportedTargets": ["CFS-1_QEMU"],
     "timeoutSec": 120,
     "steps": [
-      {"id":"locate-key","type":"resolveAddress","timeoutSec":10,"pollIntervalSec":0.5},
-      {"id":"recover-byte-00","type":"crcByte","offset":0,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-01","type":"crcByte","offset":1,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-02","type":"crcByte","offset":2,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-03","type":"crcByte","offset":3,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-04","type":"crcByte","offset":4,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-05","type":"crcByte","offset":5,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-06","type":"crcByte","offset":6,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-07","type":"crcByte","offset":7,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-08","type":"crcByte","offset":8,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-09","type":"crcByte","offset":9,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-10","type":"crcByte","offset":10,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-11","type":"crcByte","offset":11,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-12","type":"crcByte","offset":12,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-13","type":"crcByte","offset":13,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-14","type":"crcByte","offset":14,"timeoutSec":6,"pollIntervalSec":0.25},
-      {"id":"recover-byte-15","type":"crcByte","offset":15,"timeoutSec":6,"pollIntervalSec":0.25}
+      {"id":"seal-baseline","type":"tcLogPhase","phase":"seal-baseline"},
+      {"id":"record-normal","type":"tcLogPhase","phase":"record-normal"},
+      {"id":"seal-target","type":"tcLogPhase","phase":"seal-target"},
+      {"id":"read-before","type":"tcLogPhase","phase":"read-before"},
+      {"id":"overwrite-log","type":"tcLogPhase","phase":"overwrite-log"},
+      {"id":"read-after","type":"tcLogPhase","phase":"read-after"},
+      {"id":"confirm-continuity","type":"tcLogPhase","phase":"confirm-continuity"}
     ],
     "telemetryItems": [
-      {"packet":"XKEY_HK","item":"KEY_ADDRESS"},
-      {"packet":"XKEY_HK","item":"KEY_LENGTH"},
-      {"packet":"XKEY_HK","item":"CHANNEL_READY"},
-      {"packet":"CS_HK","item":"LAST_ONE_SHOT_ADDRESS"},
-      {"packet":"CS_HK","item":"LAST_ONE_SHOT_CHECKSUM"}
+      {"packet":"CI_LOG_STATUS","item":"RESULT"},
+      {"packet":"CI_LOG_CHUNK","item":"RESULT"},
+      {"packet":"TC_CAMERA_RESULT","item":"STATUS"}
+    ],
+    "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
+  },
+  {
+    "schemaVersion": 1,
+    "id": "bbb-tc-log-photo-traversal",
+    "version": "1.0.0",
+    "name": "BBB TC log photo path traversal",
+    "description": "Record commands in an onboard TC log, seal and read the file, then use a camera filename containing ../ to replace that closed log with a fixed image. Ground command history remains separate.",
+    "supportedTargets": ["CFS-1_BBB"],
+    "timeoutSec": 120,
+    "steps": [
+      {"id":"seal-baseline","type":"tcLogPhase","phase":"seal-baseline"},
+      {"id":"record-normal","type":"tcLogPhase","phase":"record-normal"},
+      {"id":"seal-target","type":"tcLogPhase","phase":"seal-target"},
+      {"id":"read-before","type":"tcLogPhase","phase":"read-before"},
+      {"id":"overwrite-log","type":"tcLogPhase","phase":"overwrite-log"},
+      {"id":"read-after","type":"tcLogPhase","phase":"read-after"},
+      {"id":"confirm-continuity","type":"tcLogPhase","phase":"confirm-continuity"}
+    ],
+    "telemetryItems": [
+      {"packet":"CI_LOG_STATUS","item":"RESULT"},
+      {"packet":"CI_LOG_CHUNK","item":"RESULT"},
+      {"packet":"TC_CAMERA_RESULT","item":"STATUS"}
     ],
     "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
   }

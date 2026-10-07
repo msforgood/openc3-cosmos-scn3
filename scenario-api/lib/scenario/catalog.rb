@@ -40,6 +40,10 @@ module Scenario
       check(d['version'].is_a?(String) && d['version'].length <= 32 && /\A[0-9]+\.[0-9]+\.[0-9]+\z/.match?(d['version']))
       { 'name' => 120, 'description' => 1000 }.each { |key, max| check(d[key].is_a?(String) && d[key].length.between?(1, max)) }
       check(d['supportedTargets'].is_a?(Array) && d['supportedTargets'].size == 1 && @policy.fetch('allowedTargets').include?(d['supportedTargets'][0]))
+      if d['supportedTargets'][0] == 'CFS-1_BBB'
+        check(d['id'] == @policy.fetch('tcLogTraversal').fetch('scenarioIds').fetch('CFS-1_BBB') &&
+              d['steps'].is_a?(Array) && d['steps'].any? { |step| step.is_a?(Hash) && step['type'] == 'tcLogPhase' })
+      end
       number!(d['timeoutSec'], 1, 120)
       check(d['successCriteria'] == { 'type' => 'allStepsSucceeded', 'requireFreshTelemetry' => true })
       check(d['telemetryItems'].is_a?(Array) && d['telemetryItems'].size.between?(1, 16))
@@ -48,6 +52,7 @@ module Scenario
       check(d['steps'].is_a?(Array) && d['steps'].size.between?(2, 17) && d['steps'].all? { |s| s.is_a?(Hash) })
       check(d['steps'].map { |s| s['id'] }.uniq.size == d['steps'].size)
       return validate_crc_oracle!(d, refs) if d['steps'].any? { |s| %w[resolveAddress crcByte].include?(s['type']) }
+      return validate_tc_log!(d, refs) if d['steps'].any? { |s| s['type'] == 'tcLogPhase' }
       pending, waited, total, commands = [], [], 0, 0
       d['steps'].each do |s|
         definition_id!(s['id'])
@@ -104,6 +109,19 @@ module Scenario
         keys!(step, %w[id type offset timeoutSec pollIntervalSec])
         check(step == {'id' => format('recover-byte-%02d', offset), 'type' => 'crcByte',
                        'offset' => offset, 'timeoutSec' => 6, 'pollIntervalSec' => 0.25})
+      end
+    end
+
+    def validate_tc_log!(definition, refs)
+      policy = @policy.fetch('tcLogTraversal')
+      target = definition['supportedTargets'].first
+      check(definition['id'] == policy.fetch('scenarioIds')[target] && definition['timeoutSec'] == 120)
+      check(refs.sort == [['CI_LOG_STATUS', 'RESULT'], ['CI_LOG_CHUNK', 'RESULT'], ['TC_CAMERA_RESULT', 'STATUS']].sort)
+      phases = policy.fetch('phases')
+      check(definition['steps'].size == phases.size)
+      definition['steps'].zip(phases).each do |step, phase|
+        keys!(step, %w[id type phase])
+        check(step == {'id' => phase, 'type' => 'tcLogPhase', 'phase' => phase})
       end
     end
 

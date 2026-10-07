@@ -56,4 +56,17 @@ class CatalogTest < ScenarioTest
     d['telemetryItems'] << { 'packet' => 'CFE_EVS_HK', 'item' => 'COMMAND_COUNTER' }
     assert_error('invalid_catalog') { validate(d) }
   end
+
+  def test_tc_log_demo_is_fixed_for_each_target
+    assert_error('scenario_not_found') { @catalog.get('qemu-cs-crc-key-oracle') }
+    %w[qemu bbb].each do |platform|
+      d = @catalog.get("#{platform}-tc-log-photo-traversal")
+      assert validate(d)
+      d['steps'][4]['phase'] = 'read-after'
+      assert_error('invalid_catalog') { validate(d) }
+      d = @catalog.get("#{platform}-tc-log-photo-traversal")
+      d['telemetryItems'] << {'packet' => 'CFE_ES_HK', 'item' => 'COMMAND_COUNTER'}
+      assert_error('invalid_catalog') { validate(d) }
+    end
+  end
 end

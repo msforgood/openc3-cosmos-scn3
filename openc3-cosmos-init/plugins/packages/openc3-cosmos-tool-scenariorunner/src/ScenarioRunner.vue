@@ -36,6 +36,7 @@
           <p><code>{{ recoveredKey }}</code></p>
           <p class="muted small">16 one-byte CRC responses reconstructed this key. Use the isolated channel verifier to confirm it.</p>
         </div>
+        <TcLogEvidence v-if="isTcLogScenario" :steps="displaySteps" />
         <div class="run-progress"><label for="run-progress">{{ completedSteps }} / {{ selectedScenario?.steps.length || 0 }} steps complete</label>
           <progress id="run-progress" :value="completedSteps" :max="selectedScenario?.steps.length || 1" />
           <div class="time-row"><span>Elapsed {{ matchesRun ? elapsed : 0 }}s</span><span v-if="matchesRun && state.run?.deadline">Deadline {{ formatTime(state.run.deadline) }}</span></div>
@@ -79,6 +80,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { OpenC3Api } from '@openc3/js-common/services'
 import { TopBar } from '@openc3/vue-common/components'
 import TelemetryPanel from './TelemetryPanel.vue'
+import TcLogEvidence from './TcLogEvidence.vue'
 import { createScenarioApi } from './scenarioApi.js'
 import { initialRunnerState, RunnerController, runMatchesScenario } from './runnerController.js'
 import { supportedTargets, formatTime, errorMessage, STORAGE_PREFIX } from './runtime.js'
@@ -103,6 +105,7 @@ const displaySteps = computed(() => matchesRun.value ? state.steps : {})
 const displayStatus = computed(() => state.run && !matchesRun.value && !locked.value ? 'ready' : state.status)
 const completedSteps = computed(() => selectedScenario.value?.steps.filter((step) => displaySteps.value[step.id]?.status === 'succeeded').length || 0)
 const recoveredKey = computed(() => matchesRun.value ? /^Recovered X-band lab key: ([0-9a-f]{32})$/.exec(state.run?.result?.message || '')?.[1] || '' : '')
+const isTcLogScenario = computed(() => ['qemu-tc-log-photo-traversal', 'bbb-tc-log-photo-traversal'].includes(selectedScenario.value?.id))
 const elapsed = computed(() => {
   if (!state.run) return 0
   const end = ['succeeded', 'failed', 'stopped'].includes(state.status) ? Date.parse(state.run.updated_at) : now.value
@@ -149,6 +152,15 @@ function stepDescription(step) {
   if (step.type === 'waitTelemetry') return `Wait for ${step.packet}.${step.item} ${step.operator} ${step.value} · timeout ${step.timeoutSec}s`
   if (step.type === 'resolveAddress') return 'Read key location and channel status from XKEY_HK'
   if (step.type === 'crcByte') return `CS OneShot: offset ${step.offset}, size 1 · confirm fresh CS_HK and invert CRC`
+  if (step.type === 'tcLogPhase') return ({
+    'seal-baseline': 'Close the previous onboard log and start a fresh file',
+    'record-normal': 'Send a housekeeping TC and save a normal photo',
+    'seal-target': 'Close the TC log chosen for the demonstration',
+    'read-before': 'Read the closed log through CI_LAB telemetry',
+    'overwrite-log': 'Save a photo named ../log/tcNNNN.log',
+    'read-after': 'Read the same path and verify the PNG signature',
+    'confirm-continuity': 'Confirm later commands are recorded in the next log',
+  })[step.phase] || step.phase
   return step.type
 }
 function logMessage(event) {

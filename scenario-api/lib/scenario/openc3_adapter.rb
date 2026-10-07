@@ -41,6 +41,7 @@ module Scenario
     def validate_definition!(scope, target, definition)
       raise Error.new('unsupported_target') unless @policy.fetch('allowedTargets').include?(target)
       Timeout.timeout(8) do
+        validate_tc_log(scope, target) if definition['steps'].any? { |step| step['type'] == 'tcLogPhase' }
         definition['steps'].each do |step|
           if step['type'] == 'command'
             # Policy is packaged identically with the procedure, not duplicated packet names in code.
@@ -150,6 +151,51 @@ module Scenario
     end
 
     private
+
+    def validate_tc_log(scope, target)
+      policy = @policy.fetch('tcLogTraversal')
+      raise Error.new('unsupported_target') unless policy.fetch('scenarioIds').key?(target)
+      command_fields = {
+        'CI_LOG_STATUS_CMD' => [2, {'REQUEST_ID' => ['UINT', 16], 'RESERVED' => ['UINT', 16]}],
+        'CI_LOG_SEAL_CMD' => [3, {'REQUEST_ID' => ['UINT', 16], 'RESERVED' => ['UINT', 16]}],
+        'CI_LOG_READ_CMD' => [4, {'REQUEST_ID' => ['UINT', 16], 'FILE_INDEX' => ['UINT', 16], 'OFFSET' => ['UINT', 32]}],
+        'TC_CAMERA_CAPTURE_CMD' => [2, {'REQUEST_ID' => ['UINT', 16], 'FILENAME' => ['STRING', 256]}],
+        'CFE_ES_SEND_HK_CMD' => [0, {}]
+      }
+      command_fields.each do |name, (function_code, fields)|
+        packet = OpenC3::TargetModel.packet(target, name, type: :CMD, scope: scope)
+        unless packet['target_name'] == target && packet['packet_name'] == name &&
+               %w[hazardous disabled hidden].none? { |flag| packet[flag] }
+          raise Error.new('unsafe_command_definition', nil, 409)
+        end
+        items = packet.fetch('items', []).to_h { |item| [item['name'], item] }
+        header = @policy.fetch('headerDefaults').merge('CCSDS_STREAMID' => @policy.fetch('commands').fetch(name).fetch('streamId'),
+                                                       'CCSDS_FC' => function_code)
+        reserved = OpenC3::Packet::RESERVED_ITEM_NAMES
+        unless (items.keys - header.keys - reserved).sort == fields.keys.sort &&
+               header.all? { |item, value| items.dig(item, 'default') == value } &&
+               items.dig('CCSDS_STREAMID', 'id_value') == header.fetch('CCSDS_STREAMID') &&
+               fields.all? { |item, (kind, size)| items.dig(item, 'data_type') == kind && items.dig(item, 'bit_size') == size }
+          raise Error.new('command_parameter_mismatch', nil, 409)
+        end
+      end
+      telemetry_fields = {
+        'CI_LOG_STATUS' => {'REQUEST_ID' => 16, 'RESULT' => 16, 'ACTIVE_INDEX' => 16, 'LAST_CLOSED_INDEX' => 16,
+                            'ACTIVE_RECORDS' => 32, 'TOTAL_LOGGED' => 32, 'WRITE_ERRORS' => 32, 'READ_ERRORS' => 32},
+        'CI_LOG_CHUNK' => {'REQUEST_ID' => 16, 'RESULT' => 16, 'FILE_INDEX' => 16,
+                           'DATA_LENGTH' => 16, 'OFFSET' => 32, 'FILE_SIZE' => 32, 'DATA' => 8},
+        'TC_CAMERA_RESULT' => {'REQUEST_ID' => 16, 'STATUS' => 16, 'BYTES_WRITTEN' => 32, 'FILENAME' => 256}
+      }
+      telemetry_fields.each do |name, fields|
+        packet = OpenC3::TargetModel.packet(target, name, type: :TLM, scope: scope)
+        raise Error.new('telemetry_definition_mismatch', nil, 409) unless packet['target_name'] == target && packet['packet_name'] == name
+        items = packet.fetch('items', []).to_h { |item| [item['name'], item] }
+        unless fields.all? { |item, size| items.dig(item, 'data_type') == (item == 'FILENAME' ? 'STRING' : 'UINT') && items.dig(item, 'bit_size') == size } &&
+               %w[RECEIVED_TIMESECONDS RECEIVED_COUNT].all? { |item| items.dig(item, 'data_type') == 'DERIVED' }
+          raise Error.new('telemetry_definition_mismatch', nil, 409)
+        end
+      end
+    end
 
     def validate_item(scope, target, item)
       packets = @policy.fetch('commands').values.map { |command| command.fetch('telemetryPacket') }

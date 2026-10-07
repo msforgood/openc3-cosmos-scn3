@@ -271,7 +271,7 @@ services:
 
   openc3-cosmos-init:
     user: "${OPENC3_USER_ID:-1001}:${OPENC3_GROUP_ID:-1001}"
-    image: local/openc3-cosmos-init:6.10.1-scenario-${SCENARIO_VERSION:-1.0.4}
+    image: local/openc3-cosmos-init:6.10.1-scenario-${SCENARIO_VERSION:-1.0.9}
     build:
       context: ./openc3-cosmos-init
       additional_contexts:
@@ -280,7 +280,7 @@ services:
         OPENC3_REGISTRY: ${OPENC3_REGISTRY}
         OPENC3_NAMESPACE: ${OPENC3_NAMESPACE}
         OPENC3_TAG: ${OPENC3_TAG}
-        SCENARIO_VERSION: ${SCENARIO_VERSION:-1.0.4}
+        SCENARIO_VERSION: ${SCENARIO_VERSION:-1.0.9}
     # The init image builds and installs stock Tools and guarded Scenario plugins.
     restart: "no"
     init: true
@@ -309,6 +309,7 @@ services:
       - PYTHONUSERBASE=/gems/python_packages
       - SCENARIO_DB=/data/scenario.sqlite3
       - SCENARIO_SCOPE=DEFAULT
+      - SCENARIO_UPGRADE_FROM
       - OPENC3_REDIS_USERNAME=${OPENC3_REDIS_USERNAME}
       - OPENC3_REDIS_PASSWORD=${OPENC3_REDIS_PASSWORD}
       - OPENC3_BUCKET_USERNAME=${OPENC3_BUCKET_USERNAME}
@@ -319,14 +320,14 @@ services:
       - .env
 
   scenario-api:
-    image: local/openc3-scenario-api:6.10.1-${SCENARIO_VERSION:-1.0.4}
+    image: local/openc3-scenario-api:6.10.1-${SCENARIO_VERSION:-1.0.9}
     build:
       context: ./scenario-api
       additional_contexts:
         scenario_catalog: ./openc3-cosmos-init/plugins/packages/openc3-cosmos-cfs-scenario-runner/targets/SCENARIO_RUNNER
       args:
         OPENC3_BASE_IMAGE: "${OPENC3_REGISTRY}/${OPENC3_NAMESPACE}/openc3-cosmos-script-runner-api${OPENC3_IMAGE_SUFFIX}:${OPENC3_TAG}"
-        SCENARIO_VERSION: ${SCENARIO_VERSION:-1.0.4}
+        SCENARIO_VERSION: ${SCENARIO_VERSION:-1.0.9}
     platform: linux/amd64
     user: "1001:1001"
     restart: unless-stopped

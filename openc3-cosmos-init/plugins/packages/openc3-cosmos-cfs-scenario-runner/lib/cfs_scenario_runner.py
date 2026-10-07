@@ -26,6 +26,7 @@ COMMANDS = {name: (data["telemetryPacket"], data["streamId"]) for name, data in 
 ITEMS = frozenset(POLICY["telemetryItems"])
 TELEMETRY_TYPES = POLICY.get("telemetryTypes", {})
 ORACLE = POLICY["crcKeyOracle"]
+TCLOG = POLICY["tcLogTraversal"]
 RECEIPT_ITEMS = ("RECEIVED_COUNT", "RECEIVED_TIMESECONDS")
 RESERVED_ITEMS = frozenset({"PACKET_TIMESECONDS", "PACKET_TIMEFORMATTED", "RECEIVED_TIMESECONDS", "RECEIVED_TIMEFORMATTED", "RECEIVED_COUNT"})
 HEADER_DEFAULTS = POLICY["headerDefaults"]
@@ -103,6 +104,9 @@ def validate_definition(definition):
     for field, maximum in (("name", 120), ("description", 1000)):
         require(type(definition[field]) is str and 1 <= len(definition[field]) <= maximum)
     require(type(definition["supportedTargets"]) is list and len(definition["supportedTargets"]) == 1 and definition["supportedTargets"][0] in ALLOWED_TARGETS)
+    if definition["supportedTargets"][0] == "CFS-1_BBB":
+        require(definition["id"] == TCLOG["scenarioIds"]["CFS-1_BBB"] and
+                any(type(step) is dict and step.get("type") == "tcLogPhase" for step in definition["steps"]))
     _number(definition["timeoutSec"], 1, 120)
     _keys(definition["successCriteria"], "type requireFreshTelemetry")
     require(definition["successCriteria"]["type"] == "allStepsSucceeded" and definition["successCriteria"]["requireFreshTelemetry"] is True)
@@ -125,6 +129,16 @@ def validate_definition(definition):
         for offset, step in enumerate(steps[1:]):
             require(step == {"id": f"recover-byte-{offset:02d}", "type": "crcByte", "offset": offset,
                              "timeoutSec": 6, "pollIntervalSec": 0.25})
+        canonical_hash(definition)
+        return definition
+    if any(type(step) is dict and step.get("type") == "tcLogPhase" for step in steps):
+        target = definition["supportedTargets"][0]
+        require(definition["id"] == TCLOG["scenarioIds"].get(target) and definition["timeoutSec"] == 120)
+        require(set(refs) == {("CI_LOG_STATUS", "RESULT"), ("CI_LOG_CHUNK", "RESULT"),
+                              ("TC_CAMERA_RESULT", "STATUS")})
+        require(len(steps) == len(TCLOG["phases"]))
+        for step, phase in zip(steps, TCLOG["phases"]):
+            require(step == {"id": phase, "type": "tcLogPhase", "phase": phase})
         canonical_hash(definition)
         return definition
     seen, waited, pending = set(), set(), set()
@@ -374,6 +388,9 @@ class ScenarioRunner:
     def _preflight(self, definition):
         names = self._call(self.adapter.targets, "targets")
         require(type(names) is list and self.target in set(names).intersection(definition["supportedTargets"]).intersection(ALLOWED_TARGETS), "target_not_installed")
+        if any(step["type"] == "tcLogPhase" for step in definition["steps"]):
+            self._preflight_tc_log()
+            return
         for packet in dict.fromkeys(s["packet"] for s in definition["steps"] if s["type"] == "command"):
             data = self._call(lambda: self.adapter.command_definition(self.target, packet), "command_definition")
             require(type(data) is dict and data.get("target_name") == self.target and data.get("packet_name") == packet, "invalid_command")
@@ -395,6 +412,47 @@ class ScenarioRunner:
             require(all(items[k].get("data_type") == "DERIVED" for k in RECEIPT_ITEMS), "telemetry_definition_mismatch")
         if any(step["type"] == "crcByte" for step in definition["steps"]):
             self._preflight_oracle()
+
+    def _preflight_tc_log(self):
+        fields = {
+            "CI_LOG_STATUS_CMD": (2, {"REQUEST_ID": ("UINT", 16), "RESERVED": ("UINT", 16)}),
+            "CI_LOG_SEAL_CMD": (3, {"REQUEST_ID": ("UINT", 16), "RESERVED": ("UINT", 16)}),
+            "CI_LOG_READ_CMD": (4, {"REQUEST_ID": ("UINT", 16), "FILE_INDEX": ("UINT", 16), "OFFSET": ("UINT", 32)}),
+            "TC_CAMERA_CAPTURE_CMD": (2, {"REQUEST_ID": ("UINT", 16), "FILENAME": ("STRING", 256)}),
+            "CFE_ES_SEND_HK_CMD": (0, {}),
+        }
+        for packet, (function_code, expected_fields) in fields.items():
+            data = self._call(lambda p=packet: self.adapter.command_definition(self.target, p), "command_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet and
+                    not any(data.get(flag) for flag in ("hazardous", "disabled", "hidden")), "invalid_command")
+            items = {item["name"]: item for item in data.get("items", [])}
+            header = dict(HEADER_DEFAULTS, CCSDS_STREAMID=COMMANDS[packet][1], CCSDS_FC=function_code)
+            require(set(items) == set(header) | set(expected_fields) | RESERVED_ITEMS, "command_definition_mismatch")
+            require(all(items[name].get("default") == value for name, value in header.items()) and
+                    items["CCSDS_STREAMID"].get("id_value") == header["CCSDS_STREAMID"], "command_definition_mismatch")
+            require(all((items[name].get("data_type"), items[name].get("bit_size")) == kind_size
+                        for name, kind_size in expected_fields.items()), "command_definition_mismatch")
+        telemetry = {
+            "CI_LOG_STATUS": {"REQUEST_ID": 16, "RESULT": 16, "ACTIVE_INDEX": 16,
+                              "LAST_CLOSED_INDEX": 16, "ACTIVE_RECORDS": 32, "TOTAL_LOGGED": 32,
+                              "WRITE_ERRORS": 32, "READ_ERRORS": 32},
+            "CI_LOG_CHUNK": {"REQUEST_ID": 16, "RESULT": 16, "FILE_INDEX": 16,
+                             "DATA_LENGTH": 16, "OFFSET": 32, "FILE_SIZE": 32, "DATA": 8},
+            "TC_CAMERA_RESULT": {"REQUEST_ID": 16, "STATUS": 16, "BYTES_WRITTEN": 32,
+                                 "FILENAME": 256},
+        }
+        for packet, required in telemetry.items():
+            data = self._call(lambda p=packet: self.adapter.telemetry_definition(self.target, p), "telemetry_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet, "invalid_telemetry_item")
+            items = {item["name"]: item for item in data.get("items", [])}
+            require(set(required) | set(RECEIPT_ITEMS) <= set(items), "invalid_telemetry_item")
+            require(all(items[name].get("data_type") == ("STRING" if name == "FILENAME" else "UINT") and
+                        items[name].get("bit_size") == size for name, size in required.items()),
+                    "telemetry_definition_mismatch")
+            require(all(items[name].get("data_type") == "DERIVED" for name in RECEIPT_ITEMS),
+                    "telemetry_definition_mismatch")
 
     def _preflight_oracle(self):
         packet = ORACLE["command"]
@@ -520,6 +578,157 @@ class ScenarioRunner:
             self.sleep(min(step["pollIntervalSec"], end - self.monotonic(), self._remaining()))
         raise ScenarioError("crc_telemetry_timeout")
 
+    def _tc_next_request_id(self):
+        if not hasattr(self, "tc_request_id"):
+            self.tc_request_id = int(self.wall_time() * 1000) & 0xffff
+        self.tc_request_id = (self.tc_request_id + 1) & 0xffff
+        return self.tc_request_id
+
+    def _tc_request(self, command, parameters, response_packet, fields, result_field):
+        request_id = self._tc_next_request_id()
+        parameters = dict(parameters, REQUEST_ID=request_id)
+        baseline = self._call(lambda: self.adapter.sample_fields(self.target, response_packet, fields), "baseline")
+        if self.last_send is not None:
+            self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
+        self._check_stop()
+        sent_at = self.wall_time()
+        self.last_send = self.monotonic()
+        timeout = self._remaining(2)
+        accepted = self._call(lambda: self.adapter.command(self.target, command, parameters, timeout),
+                              "command", timeout)
+        require(type(accepted) is dict and accepted.get("target_name") == self.target and
+                accepted.get("cmd_name") == command, "command_not_accepted")
+        end = min(self.deadline, self.monotonic() + 10)
+        for _ in range(41):
+            if self.monotonic() >= end:
+                break
+            self._check_stop()
+            sample = self._call(lambda: self.adapter.sample_fields(self.target, response_packet, fields),
+                                "telemetry", min(2, max(0.001, end - self.monotonic())))
+            now = self.wall_time()
+            fresh = (not sample.stale and sample.count > baseline.count and
+                     sample.received > baseline.received and sample.received >= int(sent_at) - 1 and
+                     -1 <= now - sample.received <= 5)
+            if fresh and sample.values.get("REQUEST_ID") == request_id:
+                result = sample.values.get(result_field)
+                require(type(result) is int and 0 <= result <= 6, "invalid_telemetry")
+                require(result == 0, f"tc_result_{result}")
+                return sample
+            self.sleep(min(0.25, max(0, end - self.monotonic()), self._remaining()))
+        raise ScenarioError("tc_telemetry_timeout")
+
+    def _tc_status(self, seal=False):
+        fields = ("REQUEST_ID", "RESULT", "ACTIVE_INDEX", "LAST_CLOSED_INDEX",
+                  "ACTIVE_RECORDS", "TOTAL_LOGGED", "WRITE_ERRORS", "READ_ERRORS")
+        command = "CI_LOG_SEAL_CMD" if seal else "CI_LOG_STATUS_CMD"
+        return self._tc_request(command, {"RESERVED": 0}, "CI_LOG_STATUS", fields, "RESULT")
+
+    def _tc_read(self, index):
+        fields = ("REQUEST_ID", "RESULT", "FILE_INDEX", "DATA_LENGTH", "OFFSET", "FILE_SIZE", "DATA")
+        sample = self._tc_request("CI_LOG_READ_CMD", {"FILE_INDEX": index, "OFFSET": 0},
+                                  "CI_LOG_CHUNK", fields, "RESULT")
+        values = sample.values
+        length, size, raw = values["DATA_LENGTH"], values["FILE_SIZE"], values["DATA"]
+        require(values["FILE_INDEX"] == index and values["OFFSET"] == 0 and
+                type(length) is int and 0 < length <= TCLOG["maxChunkBytes"] and
+                type(size) is int and length <= size, "invalid_log_chunk")
+        if type(raw) in (bytes, bytearray):
+            data = bytes(raw)
+        elif (type(raw) in (list, tuple) and len(raw) == TCLOG["maxChunkBytes"] and
+              all(type(value) is int and 0 <= value <= 255 for value in raw)):
+            data = bytes(raw)
+        else:
+            raise ScenarioError("invalid_log_chunk")
+        require(len(data) == TCLOG["maxChunkBytes"] and all(value == 0 for value in data[length:]),
+                "invalid_log_chunk")
+        return data[:length], size, sample.received
+
+    def _tc_camera(self, filename):
+        fields = ("REQUEST_ID", "STATUS", "BYTES_WRITTEN", "FILENAME")
+        sample = self._tc_request("TC_CAMERA_CAPTURE_CMD", {"FILENAME": filename},
+                                  "TC_CAMERA_RESULT", fields, "STATUS")
+        count = sample.values["BYTES_WRITTEN"]
+        require(type(count) is int and 8 <= count <= 1048576, "invalid_photo_size")
+        return count, sample.received
+
+    def _tc_hk(self):
+        if self.last_send is not None:
+            self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
+        self._check_stop()
+        self.last_send = self.monotonic()
+        timeout = self._remaining(2)
+        accepted = self._call(lambda: self.adapter.command(self.target, "CFE_ES_SEND_HK_CMD", {}, timeout),
+                              "command", timeout)
+        require(type(accepted) is dict and accepted.get("target_name") == self.target and
+                accepted.get("cmd_name") == "CFE_ES_SEND_HK_CMD", "command_not_accepted")
+
+    def _tc_log_phase(self, step):
+        phase = step["phase"]
+        if phase == "seal-baseline":
+            values = self._tc_status(seal=True).values
+            require(values["WRITE_ERRORS"] == 0 and values["LAST_CLOSED_INDEX"] >= 1 and
+                    values["ACTIVE_INDEX"] > values["LAST_CLOSED_INDEX"], "log_not_ready")
+            self.tc_baseline_index = values["LAST_CLOSED_INDEX"]
+            return {"file_index": self.tc_baseline_index, "message": "Closed the previous onboard TC log",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "record-normal":
+            require(hasattr(self, "tc_baseline_index"), "invalid_log_state")
+            self._tc_hk()
+            count, received = self._tc_camera(TCLOG["normalFilename"])
+            return {"filename": TCLOG["normalFilename"], "photo_bytes": count,
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Normal camera TC and housekeeping TC accepted",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "seal-target":
+            values = self._tc_status(seal=True).values
+            index = values["LAST_CLOSED_INDEX"]
+            require(type(index) is int and self.tc_baseline_index < index <= 9999 and
+                    values["ACTIVE_INDEX"] > index and values["WRITE_ERRORS"] == 0,
+                    "target_log_unavailable")
+            self.tc_target_index = index
+            self.tc_total_before = values["TOTAL_LOGGED"]
+            return {"file_index": index, "total_logged": self.tc_total_before,
+                    "message": f"Sealed onboard /cf/log/tc{index:04d}.log",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        require(hasattr(self, "tc_target_index"), "invalid_log_state")
+        if phase == "read-before":
+            data, size, received = self._tc_read(self.tc_target_index)
+            require(data.startswith(b"TCLOG v1\n") and b"mid=0x18E2" in data,
+                    "expected_tc_log_missing")
+            self.tc_before = data
+            return {"file_index": self.tc_target_index, "file_size": size,
+                    "before_text": data.decode("ascii", errors="replace"), "before_hex": data.hex(),
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Read original onboard TC log bytes", "telemetryConfirmed": True}
+        if phase == "overwrite-log":
+            require(hasattr(self, "tc_before"), "invalid_log_state")
+            filename = f"../log/tc{self.tc_target_index:04d}.log"
+            count, received = self._tc_camera(filename)
+            self.tc_photo_bytes = count
+            return {"file_index": self.tc_target_index, "filename": filename, "photo_bytes": count,
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Camera reported writing the chosen filename",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "read-after":
+            require(hasattr(self, "tc_photo_bytes"), "invalid_log_state")
+            data, size, received = self._tc_read(self.tc_target_index)
+            require(data.startswith(bytes.fromhex(TCLOG["imageSignatureHex"])) and
+                    size == self.tc_photo_bytes and data != self.tc_before,
+                    "log_overwrite_unconfirmed")
+            return {"file_index": self.tc_target_index, "file_size": size,
+                    "after_hex": data.hex(), "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Same onboard log path now contains PNG bytes", "telemetryConfirmed": True}
+        if phase == "confirm-continuity":
+            values = self._tc_status().values
+            require(values["WRITE_ERRORS"] == 0 and values["ACTIVE_INDEX"] > self.tc_target_index and
+                    values["ACTIVE_RECORDS"] > 0 and values["TOTAL_LOGGED"] > self.tc_total_before,
+                    "logging_not_continuing")
+            return {"active_index": values["ACTIVE_INDEX"], "total_logged": values["TOTAL_LOGGED"],
+                    "write_errors": values["WRITE_ERRORS"],
+                    "message": "Later TC packets continue in the next onboard log",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        raise ScenarioError("invalid_log_phase")
+
     def run(self):
         try:
             context = self._call(self.management.context, "context")
@@ -548,12 +757,16 @@ class ScenarioRunner:
                     data = self._resolve_address(step)
                 elif step["type"] == "crcByte":
                     data = self._crc_byte(step)
+                elif step["type"] == "tcLogPhase":
+                    data = self._tc_log_phase(step)
                 else:
                     data = self._wait_telemetry(step)
                 self._emit("step", dict(data, step_id=step["id"], status="succeeded"))
             if hasattr(self, "recovered"):
                 require(len(self.recovered) == ORACLE["keyBytes"], "incomplete_key")
                 message = "Recovered X-band lab key: " + self.recovered.hex()
+            elif hasattr(self, "tc_target_index"):
+                message = f"Onboard TC log tc{self.tc_target_index:04d}.log replaced by the demo photo"
             else:
                 message = "All steps completed with fresh telemetry"
             self._emit("result", {"status": "succeeded", "message": message})

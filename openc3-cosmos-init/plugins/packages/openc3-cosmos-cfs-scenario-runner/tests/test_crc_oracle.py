@@ -85,8 +85,28 @@ class Management:
 
 class OracleTests(unittest.TestCase):
     def setUp(self):
+        # Keep the legacy CRC engine testable without publishing its scenario
+        # in the scenario 2 catalog, whose flight plugin has no XKEY packet.
         self.catalog = runner.load_catalog()
-        self.definition = self.catalog["qemu-cs-crc-key-oracle"]
+        self.definition = {
+            "schemaVersion": 1, "id": "qemu-cs-crc-key-oracle", "version": "1.0.0",
+            "name": "Legacy CRC oracle test", "description": "Unit test fixture only",
+            "supportedTargets": ["CFS-1_QEMU"], "timeoutSec": 120,
+            "steps": [{"id": "locate-key", "type": "resolveAddress",
+                       "timeoutSec": 10, "pollIntervalSec": 0.5}] +
+                     [{"id": f"recover-byte-{offset:02d}", "type": "crcByte", "offset": offset,
+                       "timeoutSec": 6, "pollIntervalSec": 0.25} for offset in range(16)],
+            "telemetryItems": [
+                {"packet": "XKEY_HK", "item": "KEY_ADDRESS"},
+                {"packet": "XKEY_HK", "item": "KEY_LENGTH"},
+                {"packet": "XKEY_HK", "item": "CHANNEL_READY"},
+                {"packet": "CS_HK", "item": "LAST_ONE_SHOT_ADDRESS"},
+                {"packet": "CS_HK", "item": "LAST_ONE_SHOT_CHECKSUM"},
+            ],
+            "successCriteria": {"type": "allStepsSucceeded", "requireFreshTelemetry": True},
+        }
+        runner.validate_definition(self.definition)
+        self.catalog[self.definition["id"]] = self.definition
         self.clock = Clock()
 
     def engine(self, stale=False):

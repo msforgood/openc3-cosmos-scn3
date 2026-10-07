@@ -23,7 +23,7 @@ class ApiTest < ScenarioTest
   def test_authenticated_catalog_run_events_context_and_stop_end_to_end
     get '/scenario-api/scenarios', scope: 'DEFAULT'
     assert_equal 200, last_response.status, last_response.body
-    assert_equal 2, parsed['items'].size
+    assert_equal 4, parsed['items'].size
     json_post '/scenario-api/runs', input
     assert_equal 201, last_response.status, last_response.body
     id = parsed['id']

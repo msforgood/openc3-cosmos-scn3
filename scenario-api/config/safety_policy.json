@@ -1,13 +1,17 @@
 {
   "version": 1,
-  "allowedTargets": ["CFS-1_QEMU"],
+  "allowedTargets": ["CFS-1_QEMU", "CFS-1_BBB"],
   "commands": {
     "CFE_ES_SEND_HK_CMD": {"telemetryPacket": "CFE_ES_HK", "streamId": 6152},
     "CFE_EVS_SEND_HK_CMD": {"telemetryPacket": "CFE_EVS_HK", "streamId": 6153},
     "XKEY_SEND_HK_CMD": {"telemetryPacket": "XKEY_HK", "streamId": 6306},
-    "CS_SEND_HK_CMD": {"telemetryPacket": "CS_HK", "streamId": 6353}
+    "CS_SEND_HK_CMD": {"telemetryPacket": "CS_HK", "streamId": 6353},
+    "CI_LOG_STATUS_CMD": {"telemetryPacket": "CI_LOG_STATUS", "streamId": 6276},
+    "CI_LOG_SEAL_CMD": {"telemetryPacket": "CI_LOG_STATUS", "streamId": 6276},
+    "CI_LOG_READ_CMD": {"telemetryPacket": "CI_LOG_CHUNK", "streamId": 6276},
+    "TC_CAMERA_CAPTURE_CMD": {"telemetryPacket": "TC_CAMERA_RESULT", "streamId": 6370}
   },
-  "telemetryItems": ["COMMAND_COUNTER", "COMMAND_ERROR_COUNTER", "KEY_ADDRESS", "KEY_LENGTH", "CHANNEL_READY", "LAST_ONE_SHOT_ADDRESS", "LAST_ONE_SHOT_SIZE", "LAST_ONE_SHOT_CHECKSUM", "ONE_SHOT_IN_PROGRESS"],
+  "telemetryItems": ["COMMAND_COUNTER", "COMMAND_ERROR_COUNTER", "KEY_ADDRESS", "KEY_LENGTH", "CHANNEL_READY", "LAST_ONE_SHOT_ADDRESS", "LAST_ONE_SHOT_SIZE", "LAST_ONE_SHOT_CHECKSUM", "ONE_SHOT_IN_PROGRESS", "RESULT", "STATUS"],
   "telemetryTypes": {
     "XKEY_HK.KEY_ADDRESS": 32,
     "XKEY_HK.KEY_LENGTH": 32,
@@ -15,7 +19,19 @@
     "CS_HK.LAST_ONE_SHOT_ADDRESS": 32,
     "CS_HK.LAST_ONE_SHOT_SIZE": 32,
     "CS_HK.LAST_ONE_SHOT_CHECKSUM": 32,
-    "CS_HK.ONE_SHOT_IN_PROGRESS": 8
+    "CS_HK.ONE_SHOT_IN_PROGRESS": 8,
+    "CI_LOG_STATUS.RESULT": 16,
+    "CI_LOG_CHUNK.RESULT": 16,
+    "TC_CAMERA_RESULT.STATUS": 16
+  },
+  "tcLogTraversal": {
+    "phases": ["seal-baseline", "record-normal", "seal-target", "read-before", "overwrite-log", "read-after", "confirm-continuity"],
+    "scenarioIds": {"CFS-1_QEMU": "qemu-tc-log-photo-traversal", "CFS-1_BBB": "bbb-tc-log-photo-traversal"},
+    "commandPackets": ["CI_LOG_STATUS_CMD", "CI_LOG_SEAL_CMD", "CI_LOG_READ_CMD", "TC_CAMERA_CAPTURE_CMD", "CFE_ES_SEND_HK_CMD"],
+    "telemetryPackets": ["CI_LOG_STATUS", "CI_LOG_CHUNK", "TC_CAMERA_RESULT"],
+    "maxChunkBytes": 256,
+    "normalFilename": "orbit.png",
+    "imageSignatureHex": "89504e470d0a1a0a"
   },
   "crcKeyOracle": {
     "command": "CS_CMD_ONE_SHOT",
