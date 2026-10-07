@@ -28,6 +28,7 @@ COPY ./plugins/packages/openc3-cosmos-tool-mailbox/*.json packages/openc3-cosmos
 COPY ./plugins/packages/openc3-cosmos-tool-limitsmonitor/*.json packages/openc3-cosmos-tool-limitsmonitor/
 COPY ./plugins/packages/openc3-cosmos-tool-packetviewer/*.json packages/openc3-cosmos-tool-packetviewer/
 COPY ./plugins/packages/openc3-cosmos-tool-scriptrunner/*.json packages/openc3-cosmos-tool-scriptrunner/
+COPY ./plugins/packages/openc3-cosmos-tool-scenariorunner/package.json packages/openc3-cosmos-tool-scenariorunner/
 COPY ./plugins/packages/openc3-cosmos-tool-tablemanager/*.json packages/openc3-cosmos-tool-tablemanager/
 COPY ./plugins/packages/openc3-cosmos-tool-tlmgrapher/*.json packages/openc3-cosmos-tool-tlmgrapher/
 COPY ./plugins/packages/openc3-cosmos-tool-tlmviewer/*.json packages/openc3-cosmos-tool-tlmviewer/
@@ -130,7 +131,29 @@ WORKDIR /openc3/openc3-cosmos-tool-docs
 RUN pnpm install --frozen-lockfile --ignore-scripts
 RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-docs", "/openc3/openc3-cosmos-tool-docs"]
 
+# Scenario keeps its independent release version and procedure-only Ruby package.
+FROM openc3-frontend-tmp AS openc3-scenario
+ARG SCENARIO_VERSION=1.0.4
+COPY ./plugins/packages/openc3-cosmos-tool-scenariorunner/ packages/openc3-cosmos-tool-scenariorunner/
+RUN /openc3/plugins/docker-package-build.sh openc3-cosmos-tool-scenariorunner "" "${SCENARIO_VERSION}"
+COPY ./plugins/packages/openc3-cosmos-cfs-scenario-runner/ packages/openc3-cosmos-cfs-scenario-runner/
+RUN cd packages/openc3-cosmos-cfs-scenario-runner \
+  && rake build VERSION="${SCENARIO_VERSION}" \
+  && mv "openc3-cosmos-cfs-scenario-runner-${SCENARIO_VERSION}.gem" /openc3/plugins/gems/ \
+  && ruby build_manifest.rb "${SCENARIO_VERSION}" /openc3/plugins/gems targets/SCENARIO_RUNNER/lib
+
 FROM ${OPENC3_REGISTRY}/${OPENC3_NAMESPACE}/${OPENC3_BASE_IMAGE}:${OPENC3_TAG}
+ARG SCENARIO_VERSION=1.0.4
+ENV SCENARIO_VERSION=${SCENARIO_VERSION}
+
+# System gems remain visible when the deployment mounts /gems and sets GEM_HOME.
+USER root
+RUN apk add --no-cache sqlite-libs \
+  && apk add --no-cache --virtual .scenario-sqlite-build sqlite-dev \
+  && gem install sqlite3 --version 2.9.6 --platform ruby --no-document -- --enable-system-libraries \
+  && apk del .scenario-sqlite-build \
+  && mkdir -p /data \
+  && chown ${USER_ID}:${GROUP_ID} /data
 
 # Switch back to openc3 user for copies
 USER ${USER_ID}:${GROUP_ID}
@@ -145,6 +168,11 @@ COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plu
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/packages/openc3-vue-common/ /openc3/plugins/packages/openc3-vue-common/
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/pnpm-lock.yaml /openc3/plugins/pnpm-lock.yaml
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/pnpm-workspace.yaml /openc3/plugins/pnpm-workspace.yaml
+COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/gems/ /openc3/plugins/gems/
+# Installer support and catalog come from the same canonical procedure source.
+COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./scenario/ /openc3/scenario/
+COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/packages/openc3-cosmos-cfs-scenario-runner/targets/SCENARIO_RUNNER/lib/scenarios.json /openc3/scenario/catalog/scenarios.json
+COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/packages/openc3-cosmos-cfs-scenario-runner/targets/SCENARIO_RUNNER/lib/safety_policy.json /openc3/scenario/catalog/safety_policy.json
 # Copy in other necessary code/config for the container
 COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./init.sh /openc3/
 COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./mc /bin/mc

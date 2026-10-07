@@ -34,6 +34,10 @@ http:
         regex: "^(.*)$"
         replacement: "$1.html"
   routers:
+    scenario-api-router:
+      rule: 'Path(`/scenario-api`) || PathPrefix(`/scenario-api/`)'
+      service: scenario-api-service
+      priority: 11
     # Note: Priorities control router check order with highest priority evaluated first
     # Route to the openc3 cmd/tlm api websockets
     api-cable-router:
@@ -108,6 +112,11 @@ http:
       service: service-minio
       priority: 1
   services:
+    scenario-api-service:
+      loadBalancer:
+        passHostHeader: false
+        servers:
+          - url: http://scenario-api:2910
     # The OpenC3 cmd/tlm api cable service
     service-api-cable:
       loadBalancer:

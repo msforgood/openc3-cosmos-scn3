@@ -1,0 +1,4 @@
+TOOL scenariorunner "Scenario Runner"
+  INLINE_URL main.js
+  ICON mdi-play-box-outline
+  POSITION 3

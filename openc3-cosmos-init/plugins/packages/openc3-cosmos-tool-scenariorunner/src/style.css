@@ -1,0 +1,51 @@
+.scenario-runner { --sr-border: #435265; --sr-muted: #aebed1; --sr-panel: #172435; color: #edf3fa; padding: 20px; font-family: Arial, sans-serif; }
+.scenario-runner * { box-sizing: border-box; }
+.scenario-runner h1 { font-size: 26px; margin: 0; }
+.scenario-runner h2 { font-size: 18px; margin: 0; }
+.scenario-runner p { margin: 8px 0; }
+.runner-title, .panel-heading, .time-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.runner-title { margin-bottom: 18px; }
+.eyebrow { color: #7bbcf8; font-size: 11px; letter-spacing: .12em; }
+.scope-label, .muted { color: var(--sr-muted); }
+.small, .time-row { font-size: 12px; }
+.runner-grid { display: grid; grid-template-columns: minmax(0, 45fr) minmax(0, 55fr); gap: 18px; align-items: start; }
+.run-panel, .telemetry-panel { background: var(--sr-panel); border: 1px solid var(--sr-border); border-radius: 8px; padding: 18px; min-width: 0; }
+.panel-heading { margin-bottom: 14px; }
+.selection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.scenario-runner label { display: block; font-size: 13px; margin: 10px 0 7px; }
+.scenario-runner select { width: 100%; color: #edf3fa; background: #101c2a; border: 1px solid #668099; border-radius: 4px; padding: 10px; appearance: auto; }
+.scenario-runner button { border: 1px solid #7796b4; border-radius: 4px; padding: 9px 12px; font-weight: 600; }
+.scenario-runner button:focus-visible, .scenario-runner select:focus-visible { outline: 3px solid #9dcfff; outline-offset: 2px; }
+.scenario-runner button:disabled, .scenario-runner select:disabled { opacity: .45; cursor: not-allowed; }
+.scenario-runner button:not(:disabled) { cursor: pointer; }
+.primary-button { background: #2179c4; color: white; }
+.stop-button { color: #ffb0a8; border-color: #ae6866 !important; }
+.run-actions { display: flex; flex-wrap: wrap; gap: 9px; margin-top: 15px; }
+.badge { border: 1px solid #8090a4; border-radius: 20px; padding: 5px 9px; font-size: 12px; white-space: nowrap; }
+.run-running, .run-waiting_input { color: #90c9ff; border-color: #5995c9; }
+.run-succeeded, .comm-live { color: #96e8b6; border-color: #579c71; }
+.run-failed, .comm-disconnected { color: #ffb0a8; border-color: #ae6866; }
+.run-needs_attention, .run-stopping, .comm-delayed { color: #ffdb91; border-color: #b79354; }
+.scenario-preview { margin-top: 18px; }
+.step-list { list-style: none; padding: 0; margin: 18px 0; max-height: 380px; overflow: auto; }
+.step-list li { display: grid; grid-template-columns: 25px 1fr auto; align-items: start; gap: 9px; padding: 12px 0; border-bottom: 1px solid var(--sr-border); }
+.step-list p { overflow-wrap: anywhere; }
+.step-number { border: 1px solid #75899f; border-radius: 50%; text-align: center; font-size: 12px; padding: 3px; }
+.step-state { font-size: 11px; color: #b5c6d9; }
+.step-succeeded .step-number { color: #96e8b6; border-color: #579c71; }
+.step-failed .step-number { color: #ffb0a8; border-color: #ae6866; }
+.run-progress progress { width: 100%; height: 10px; accent-color: #64b2f8; }
+.time-row { margin-top: 8px; color: var(--sr-muted); flex-wrap: wrap; }
+.error-text, .connection-alert { color: #ffb0a8; overflow-wrap: anywhere; }
+.empty { color: var(--sr-muted); padding: 14px 0; font-size: 13px; }
+.run-id { overflow-wrap: anywhere; }
+.logs-heading, .limits-heading { margin-top: 24px; }
+.log-list, .event-list { max-height: 270px; overflow: auto; contain: content; }
+.log-list article, .limit-event { display: flex; flex-wrap: wrap; gap: 7px; border-bottom: 1px solid var(--sr-border); padding: 9px 0; font-size: 12px; overflow-wrap: anywhere; }
+.log-list time, .limit-event time { color: var(--sr-muted); flex-basis: 100%; }
+.screen-container { margin-top: 14px; max-height: 570px; overflow: auto; }
+.screen-item { min-width: 0; }
+.screen-stale { filter: grayscale(1); opacity: .58; }
+.telemetry-warning { color: #ffdb91; background: #3a3021; padding: 10px; position: sticky; top: 0; z-index: 2; }
+@media (max-width: 1000px) { .runner-grid { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 560px) { .scenario-runner { padding: 10px; } .selection-grid { grid-template-columns: 1fr; } .panel-heading { align-items: flex-start; flex-wrap: wrap; } }

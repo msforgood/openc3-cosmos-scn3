@@ -59,3 +59,7 @@ __pycache__
 
 playwright/tests/enterprise
 .vscode/settings.json
+backups/
+
+# Scenario Runner: reproducible dependencies are part of this repository.
+!/scenario-api/Gemfile.lock
