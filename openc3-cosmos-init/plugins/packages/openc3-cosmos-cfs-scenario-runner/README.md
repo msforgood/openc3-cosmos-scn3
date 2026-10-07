@@ -1,0 +1,70 @@
+# CFS Scenario Runner procedure plugin
+
+Independent `openc3-cosmos-cfs-scenario-runner` **1.0.4**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image now builds and installs it together with the Scenario UI.
+
+The initial examples are intentionally narrow:
+
+| Scenario | Target | Fixed command | Confirmation |
+|---|---|---|---|
+| `qemu-es-housekeeping` | `CFS-1_QEMU` | `CFE_ES_SEND_HK_CMD`, `{}` | Fresh `CFE_ES_HK.COMMAND_COUNTER` |
+| `qemu-evs-housekeeping` | `CFS-1_QEMU` | `CFE_EVS_SEND_HK_CMD`, `{}` | 0.5-second delay then fresh `CFE_EVS_HK.COMMAND_COUNTER` |
+
+There is no BBB execution path, payload override, arbitrary code, shell step, general command entry, reset, or configuration change. Housekeeping requests do not necessarily increment `COMMAND_COUNTER`: unchanged values are acceptable only on a provably newer received packet. Periodic housekeeping can also satisfy the freshness condition; success does not prove exclusive causality from the request.
+
+## Canonical inputs and validation
+
+`targets/SCENARIO_RUNNER/lib/scenarios.json` is the canonical catalog shared with the management API. `scenario_schema.json` defines schema version 1; `safety_policy.json` holds the shared narrow target, packet, item, and header policy. The API must consume the same release of these files. The Python runtime reads its immutable gem files, not editable run content.
+
+Definitions contain `schemaVersion`, `id`, `version`, `name`, `description`, `supportedTargets`, `timeoutSec`, `steps`, `telemetryItems`, and `successCriteria`. Runtime semantic validation additionally requires unique step IDs, at most four command steps, a corresponding later fresh telemetry wait for every command, telemetry reference agreement, and an adequate overall timeout. Parameters are fixed empty objects in this release.
+
+Each run pins the version and SHA-256 of recursively key-sorted compact UTF-8 JSON (`ensure_ascii=False`, no trailing newline or hash metadata). The API snapshot, supplied hash, and packaged local definition must agree before any command. Runtime intersects supported targets with installed targets and the QEMU-only policy. It checks actual installed command metadata against the observed header-only ES/EVS layouts (stream IDs 6152/6153, default sequence 49152, length 1, function code 0), rejects hazardous/disabled/hidden commands or extra payload items, and verifies referenced telemetry and receipt items exist with the required types.
+
+The packet names/layouts were originally read from the CFS communications plugin and checked against installed 6.10.1 TargetModel metadata without transmitting commands. Unit tests use the versioned `tests/fixtures/cfs-definitions/` reference snapshot (including its Apache-2.0 license and provenance). A standalone scn3 checkout does not require the sibling communications-plugin source. Runtime validation still uses the actual installed definitions.
+
+## Bootstrap and management integration
+
+See the shared [API contract](../scenario-api/CONTRACT.md). Management launches the fixed installed file `SCENARIO_RUNNER/procedures/run_scenario.py` through the real 6.10.1 `POST /script-api/scripts/SCENARIO_RUNNER/procedures/run_scenario.py/run` endpoint. Inputs use the supported `environment: [{key,value}, ...]` array:
+
+- `SCENARIO_RUN_ID`: persisted management run ID.
+- `SCENARIO_API_URL`: `http://scenario-api:2910/scenario-api`.
+- `SCENARIO_DEFINITION_HASH`: pinned 64-character SHA-256.
+- `SCENARIO_CONTRACT_VERSION`: `1`.
+
+OpenC3 supplies the actual scope through `OPENC3_SCOPE` and the script ID through `RunningScript.instance.script_status.name`; callback `script_id` is a decimal **string**. No scenario ID, target, version, or code supplied by a browser is interpolated into a script. Context is fetched from `/runs/:id/context`; its snapshot selects the packaged definition.
+
+Callbacks use the existing per-process OpenC3 authentication object's `token()` in memory and preserve its authorization-header format. Credentials never appear in run arguments, definitions, callback bodies, or error messages. To prevent credential forwarding, this release accepts only the dedicated internal management URL above, disables proxy environment inheritance and redirects, and bounds response size. A different service origin requires a reviewed coordinated deployment change.
+
+The runtime emits `started`, step `running`/`succeeded`/`failed`, and `result` events. Command acceptance is explicitly `commandAccepted: true, telemetryConfirmed: false`; only the later wait emits `telemetryConfirmed: true` with a receipt timestamp. The API must require both the result callback and authoritative Script Runner completion before reporting success/releasing its target lock. Callback or context failure aborts execution and never permits a later command.
+
+## Failure, freshness, and bounds
+
+- Uses `openc3.script.API_SERVER.cmd` with normal server checks and its timeout parameter. This is the existing JSON-RPC command API, not a new sender. The convenience `cmd` wrapper is avoided because it can catch hazardous/critical errors and open an interactive prompt.
+- The entrypoint sets both `RunningScript.pause_on_error = False` and `continue_after_error = False` before importing/invoking the runtime. The library is imported normally and is not rewritten into individually resumable procedure lines. Real 6.10.1 AST instrumentation is exercised by `tests/verify_openc3_6101.py`.
+- A single uncached `get_tlm_values` call reads the item plus `RECEIVED_COUNT` and `RECEIVED_TIMESECONDS` from the same CVT packet snapshot. Before each command it captures a baseline; confirmation requires both a strictly greater receipt count and receipt time, a timestamp at/after the send start, no stale flag, and receipt age at most five seconds. Counter resets, old cached values, missing values, and excessive clock skew fail closed.
+- Overall scenario timeout: 1–120 seconds (initial examples 30); command timeout: 0.1–5 seconds (initial 3); delay: 0–5 seconds; wait timeout: 0.1–30 seconds; polling interval: 0.25–2 seconds; minimum command spacing: one second; at most 16 steps, 4 commands, 64 events, 512 calls, and 64 KiB catalog/context payloads.
+- RPC/context/callback calls have a maximum two-second outer deadline (command calls use their explicit maximum), plus transport timeouts. Cancellation is checked before commands and during waits/delays. No command or callback is automatically retried. Best-effort failure reporting gets one step event and one result event, each bounded to half a second.
+- A command timeout is an ambiguous in-flight operation: a request already sent cannot be undone. The engine schedules no subsequent sends; management must reconcile Script Runner termination and must not automatically relaunch. Fresh telemetry is not assumed after such an error.
+- The shipped scenarios never request prompts. Unexpected managed prompt context fails closed; native Script Runner pause/error states are handled by the management API's stop/reconciliation behavior.
+
+## Adding a benign scenario
+
+1. Add a unique ID and semantic version to the canonical catalog. Copy one of the existing examples and compose fixed `command`, bounded `delay`, and matching `waitTelemetry` steps using the existing shared policy. Do not add caller-provided parameters or executable strings.
+2. Update `telemetryItems` and retain `{ "type": "allStepsSucceeded", "requireFreshTelemetry": true }`. Give every command a corresponding fresh telemetry wait. Keep duration/count limits within the schema.
+3. Run the Python tests and schema validation, add a meaningful behavior test for the new composition, bump the gem version, and build the gem. Existing identifiers with changed content must get a new definition version.
+4. Deliver the matching canonical catalog/schema/policy to the API and install the separate procedure gem through the normal deployment process. Version/hash mismatch blocks stale API or plugin combinations before commands.
+
+The second shipped scenario demonstrates addition without changing the engine. Adding a new command family or target is outside this release's narrow policy and needs coordinated policy/schema changes plus review of actual installed TC/TM definitions; do not relax policy merely to accept a new catalog entry.
+
+## Validation and build
+
+From the repository root:
+
+```powershell
+python -m unittest discover -s openc3-cosmos-init/plugins/packages/openc3-cosmos-cfs-scenario-runner/tests -v
+$scenarioPlugin = (Resolve-Path openc3-cosmos-init/plugins/packages/openc3-cosmos-cfs-scenario-runner).Path
+docker run --rm --network none --mount "type=bind,source=$scenarioPlugin,target=/plugin,readonly" --entrypoint python openc3inc/openc3-cosmos-script-runner-api:6.10.1 /plugin/tests/verify_openc3_6101.py
+docker run --rm --network none --mount "type=bind,source=$scenarioPlugin,target=/plugin,readonly" --entrypoint ruby openc3inc/openc3-cosmos-script-runner-api:6.10.1 /plugin/tests/verify_target_config.rb
+docker compose build openc3-cosmos-init scenario-api
+```
+
+`TARGET_MICROSERVICE` is actual supported 6.10.1 target-level syntax. Explicitly designating all seven auxiliary types prevents a default `MULTI` parent; an empty target yields no TC/TM services, `REDUCER_DISABLE` prevents reduction, and nil retention prevents cleanup. The Ruby validation calls the actual parser and empty-target deployment planner with all service launch methods set to fail if invoked. These checks and gem building do not install into any deployment.

@@ -23,3 +23,5 @@
 Dockerfile* text eol=lf
 Procfile* text eol=lf
 Rakefile* text eol=lf
+
+scenario-api/Gemfile.lock text eol=lf

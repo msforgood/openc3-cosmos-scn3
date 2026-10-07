@@ -1,0 +1,22 @@
+{
+  "source": "cfs-cosmos-plugin-bbb/targets/CFS/cmd_tlm",
+  "purpose": "Static reference snapshot for name/layout unit checks; installed target metadata is still validated before execution",
+  "files": [
+    {
+      "file": "cfe_es_cmd_def.txt",
+      "sha256": "aae3dc9f64fb8f5321eaa16b7bc5882e6cc7da886af067a182f7dc2c23a0473d"
+    },
+    {
+      "file": "cfe_evs_cmd_def.txt",
+      "sha256": "5345e597c5fa285b7c041c7981d5daf38264c972e869b9c9c494767ba4dde2f7"
+    },
+    {
+      "file": "cfe_es_tlm_def.txt",
+      "sha256": "7d4a3203ce5901cc594d0aa809aefde02bf64090b92e9b8944792d77773ef38d"
+    },
+    {
+      "file": "cfe_evs_tlm_def.txt",
+      "sha256": "26eff4bf0e4e0dce24d4f77e8e154b3a3d67eb12f1cdb68cac268ce9722f726d"
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+[
+  {
+    "schemaVersion": 1,
+    "id": "qemu-es-housekeeping",
+    "version": "1.0.0",
+    "name": "QEMU executive services housekeeping",
+    "description": "Request CFE_ES housekeeping once and confirm a newly received housekeeping packet. A fresh packet confirms telemetry reception, not exclusive attribution to this request.",
+    "supportedTargets": ["CFS-1_QEMU"],
+    "timeoutSec": 30,
+    "steps": [
+      {"id": "request-hk", "type": "command", "packet": "CFE_ES_SEND_HK_CMD", "parameters": {}, "timeoutSec": 3},
+      {"id": "confirm-hk", "type": "waitTelemetry", "packet": "CFE_ES_HK", "item": "COMMAND_COUNTER", "operator": "gte", "value": 0, "timeoutSec": 10, "pollIntervalSec": 0.5}
+    ],
+    "telemetryItems": [{"packet": "CFE_ES_HK", "item": "COMMAND_COUNTER"}],
+    "successCriteria": {"type": "allStepsSucceeded", "requireFreshTelemetry": true}
+  },
+  {
+    "schemaVersion": 1,
+    "id": "qemu-evs-housekeeping",
+    "version": "1.0.0",
+    "name": "QEMU event services housekeeping",
+    "description": "Request CFE_EVS housekeeping once, allow a bounded settling delay, and confirm a newly received housekeeping packet. This does not change event-service configuration.",
+    "supportedTargets": ["CFS-1_QEMU"],
+    "timeoutSec": 30,
+    "steps": [
+      {"id": "request-hk", "type": "command", "packet": "CFE_EVS_SEND_HK_CMD", "parameters": {}, "timeoutSec": 3},
+      {"id": "settle", "type": "delay", "seconds": 0.5},
+      {"id": "confirm-hk", "type": "waitTelemetry", "packet": "CFE_EVS_HK", "item": "COMMAND_COUNTER", "operator": "gte", "value": 0, "timeoutSec": 10, "pollIntervalSec": 0.5}
+    ],
+    "telemetryItems": [{"packet": "CFE_EVS_HK", "item": "COMMAND_COUNTER"}],
+    "successCriteria": {"type": "allStepsSucceeded", "requireFreshTelemetry": true}
+  },
+  {
+    "schemaVersion": 1,
+    "id": "qemu-cs-crc-key-oracle",
+    "version": "1.0.0",
+    "name": "CS one-byte CRC key recovery",
+    "description": "Read the X-band lab key address from housekeeping, request 16 one-byte CS CRCs over TC, and reconstruct the key from fresh CS telemetry. The key is checked separately against the isolated UDP channel.",
+    "supportedTargets": ["CFS-1_QEMU"],
+    "timeoutSec": 120,
+    "steps": [
+      {"id":"locate-key","type":"resolveAddress","timeoutSec":10,"pollIntervalSec":0.5},
+      {"id":"recover-byte-00","type":"crcByte","offset":0,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-01","type":"crcByte","offset":1,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-02","type":"crcByte","offset":2,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-03","type":"crcByte","offset":3,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-04","type":"crcByte","offset":4,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-05","type":"crcByte","offset":5,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-06","type":"crcByte","offset":6,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-07","type":"crcByte","offset":7,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-08","type":"crcByte","offset":8,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-09","type":"crcByte","offset":9,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-10","type":"crcByte","offset":10,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-11","type":"crcByte","offset":11,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-12","type":"crcByte","offset":12,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-13","type":"crcByte","offset":13,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-14","type":"crcByte","offset":14,"timeoutSec":6,"pollIntervalSec":0.25},
+      {"id":"recover-byte-15","type":"crcByte","offset":15,"timeoutSec":6,"pollIntervalSec":0.25}
+    ],
+    "telemetryItems": [
+      {"packet":"XKEY_HK","item":"KEY_ADDRESS"},
+      {"packet":"XKEY_HK","item":"KEY_LENGTH"},
+      {"packet":"XKEY_HK","item":"CHANNEL_READY"},
+      {"packet":"CS_HK","item":"LAST_ONE_SHOT_ADDRESS"},
+      {"packet":"CS_HK","item":"LAST_ONE_SHOT_CHECKSUM"}
+    ],
+    "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
+  }
+]

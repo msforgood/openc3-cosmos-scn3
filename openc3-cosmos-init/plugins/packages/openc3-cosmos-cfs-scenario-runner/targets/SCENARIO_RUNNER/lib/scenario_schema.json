@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:cfs-scenario-runner:scenario:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "id", "version", "name", "description", "supportedTargets", "timeoutSec", "steps", "telemetryItems", "successCriteria"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "maxLength": 32},
+    "name": {"type": "string", "minLength": 1, "maxLength": 120},
+    "description": {"type": "string", "minLength": 1, "maxLength": 1000},
+    "supportedTargets": {"type": "array", "minItems": 1, "maxItems": 1, "uniqueItems": true, "items": {"const": "CFS-1_QEMU"}},
+    "timeoutSec": {"type": "number", "minimum": 1, "maximum": 120},
+    "steps": {"type": "array", "minItems": 2, "maxItems": 17, "items": {"oneOf": [{"$ref": "#/$defs/command"}, {"$ref": "#/$defs/delay"}, {"$ref": "#/$defs/waitTelemetry"}, {"$ref": "#/$defs/resolveAddress"}, {"$ref": "#/$defs/crcByte"}]}},
+    "telemetryItems": {"type": "array", "minItems": 1, "maxItems": 16, "uniqueItems": true, "items": {"type": "object", "additionalProperties": false, "required": ["packet", "item"], "properties": {"packet": {"$ref": "#/$defs/packet"}, "item": {"$ref": "#/$defs/item"}}}},
+    "successCriteria": {"type": "object", "additionalProperties": false, "required": ["type", "requireFreshTelemetry"], "properties": {"type": {"const": "allStepsSucceeded"}, "requireFreshTelemetry": {"const": true}}}
+  },
+  "$defs": {
+    "stepId": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,63}$"},
+    "packet": {"enum": ["CFE_ES_HK", "CFE_EVS_HK", "XKEY_HK", "CS_HK"]},
+    "item": {"enum": ["COMMAND_COUNTER", "COMMAND_ERROR_COUNTER", "KEY_ADDRESS", "KEY_LENGTH", "CHANNEL_READY", "LAST_ONE_SHOT_ADDRESS", "LAST_ONE_SHOT_SIZE", "LAST_ONE_SHOT_CHECKSUM", "ONE_SHOT_IN_PROGRESS"]},
+    "command": {"type": "object", "additionalProperties": false, "required": ["id", "type", "packet", "parameters", "timeoutSec"], "properties": {"id": {"$ref": "#/$defs/stepId"}, "type": {"const": "command"}, "packet": {"enum": ["CFE_ES_SEND_HK_CMD", "CFE_EVS_SEND_HK_CMD"]}, "parameters": {"type": "object", "maxProperties": 0}, "timeoutSec": {"type": "number", "minimum": 0.1, "maximum": 5}}},
+    "delay": {"type": "object", "additionalProperties": false, "required": ["id", "type", "seconds"], "properties": {"id": {"$ref": "#/$defs/stepId"}, "type": {"const": "delay"}, "seconds": {"type": "number", "minimum": 0, "maximum": 5}}},
+    "waitTelemetry": {"type": "object", "additionalProperties": false, "required": ["id", "type", "packet", "item", "operator", "value", "timeoutSec", "pollIntervalSec"], "properties": {"id": {"$ref": "#/$defs/stepId"}, "type": {"const": "waitTelemetry"}, "packet": {"$ref": "#/$defs/packet"}, "item": {"$ref": "#/$defs/item"}, "operator": {"enum": ["eq", "gte", "lte"]}, "value": {"type": "integer", "minimum": 0, "maximum": 255}, "timeoutSec": {"type": "number", "minimum": 0.1, "maximum": 30}, "pollIntervalSec": {"type": "number", "minimum": 0.25, "maximum": 2}}},
+    "resolveAddress": {"type": "object", "additionalProperties": false, "required": ["id", "type", "timeoutSec", "pollIntervalSec"], "properties": {"id": {"$ref": "#/$defs/stepId"}, "type": {"const": "resolveAddress"}, "timeoutSec": {"const": 10}, "pollIntervalSec": {"const": 0.5}}},
+    "crcByte": {"type": "object", "additionalProperties": false, "required": ["id", "type", "offset", "timeoutSec", "pollIntervalSec"], "properties": {"id": {"$ref": "#/$defs/stepId"}, "type": {"const": "crcByte"}, "offset": {"type": "integer", "minimum": 0, "maximum": 15}, "timeoutSec": {"const": 6}, "pollIntervalSec": {"const": 0.25}}}
+  }
+}

@@ -1,0 +1,6 @@
+.git
+.bundle
+tmp
+log
+*.sqlite3*
+coverage

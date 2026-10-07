@@ -1,5 +1,12 @@
 #!/bin/sh
-# set -x
+# The image-contained supervisor gives core and Scenario separate time budgets.
+# Only the supervisor supplies the private phase for its child shell.
+case "${SCENARIO_INIT_PHASE}" in
+    core|teardown) ;;
+    *) exec ruby /openc3/scenario/entrypoint.rb ;;
+esac
+
+if [ "${SCENARIO_INIT_PHASE}" = "core" ]; then
 
 date
 if [ -d "/gems/gems" ]; then
@@ -12,6 +19,10 @@ if [ -d "/gems/gems" ]; then
     y=${x##*/}
     z=${y%-*}
 
+    # Scenario restoration belongs to the guarded installer only.
+    case "$z" in
+        openc3-cosmos-cfs-scenario-runner|openc3-cosmos-tool-scenariorunner) continue ;;
+    esac
     if [ "$previous" != "$z" ]
     then
         gem pristine $z
@@ -167,6 +178,11 @@ if [ -f /openc3/plugins/gems/openc3-cosmos-tool-mailbox-*.gem ]; then
     ruby /openc3/bin/openc3cli load /openc3/plugins/gems/openc3-cosmos-tool-mailbox-*.gem || exit 1
 fi
 
+# Return to the supervisor before disabling error handling or stopping Istio.
+exit 0
+fi
+
+# The supervisor reaches teardown only after successful guarded installation.
 # Need to allow errors during this wait
 set +e
 

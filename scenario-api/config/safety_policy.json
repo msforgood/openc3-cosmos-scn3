@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "allowedTargets": ["CFS-1_QEMU"],
+  "commands": {
+    "CFE_ES_SEND_HK_CMD": {"telemetryPacket": "CFE_ES_HK", "streamId": 6152},
+    "CFE_EVS_SEND_HK_CMD": {"telemetryPacket": "CFE_EVS_HK", "streamId": 6153},
+    "XKEY_SEND_HK_CMD": {"telemetryPacket": "XKEY_HK", "streamId": 6306},
+    "CS_SEND_HK_CMD": {"telemetryPacket": "CS_HK", "streamId": 6353}
+  },
+  "telemetryItems": ["COMMAND_COUNTER", "COMMAND_ERROR_COUNTER", "KEY_ADDRESS", "KEY_LENGTH", "CHANNEL_READY", "LAST_ONE_SHOT_ADDRESS", "LAST_ONE_SHOT_SIZE", "LAST_ONE_SHOT_CHECKSUM", "ONE_SHOT_IN_PROGRESS"],
+  "telemetryTypes": {
+    "XKEY_HK.KEY_ADDRESS": 32,
+    "XKEY_HK.KEY_LENGTH": 32,
+    "XKEY_HK.CHANNEL_READY": 32,
+    "CS_HK.LAST_ONE_SHOT_ADDRESS": 32,
+    "CS_HK.LAST_ONE_SHOT_SIZE": 32,
+    "CS_HK.LAST_ONE_SHOT_CHECKSUM": 32,
+    "CS_HK.ONE_SHOT_IN_PROGRESS": 8
+  },
+  "crcKeyOracle": {
+    "command": "CS_CMD_ONE_SHOT",
+    "streamId": 6352,
+    "keyPacket": "XKEY_HK",
+    "keyAddressItem": "KEY_ADDRESS",
+    "keyLengthItem": "KEY_LENGTH",
+    "channelReadyItem": "CHANNEL_READY",
+    "checksumPacket": "CS_HK",
+    "checksumAddressItem": "LAST_ONE_SHOT_ADDRESS",
+    "checksumSizeItem": "LAST_ONE_SHOT_SIZE",
+    "checksumValueItem": "LAST_ONE_SHOT_CHECKSUM",
+    "checksumBusyItem": "ONE_SHOT_IN_PROGRESS",
+    "keyBytes": 16
+  },
+  "headerDefaults": {"CCSDS_SEQUENCE": 49152, "CCSDS_LENGTH": 1, "CCSDS_FC": 0, "CCSDS_CHECKSUM": 0}
+}

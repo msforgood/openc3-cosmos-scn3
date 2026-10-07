@@ -1,0 +1,7 @@
+# Procedure-only package: no JavaScript build is needed.
+require 'rake'
+
+task :build do
+  abort 'VERSION is required: rake build VERSION=X.X.X' unless ENV['VERSION']
+  sh 'gem', 'build', 'openc3-cosmos-cfs-scenario-runner.gemspec'
+end

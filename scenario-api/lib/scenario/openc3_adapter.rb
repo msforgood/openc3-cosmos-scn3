@@ -1,0 +1,203 @@
+require 'net/http'
+require 'uri'
+require 'timeout'
+require 'openc3'
+require 'openc3/utilities/authorization'
+require 'openc3/models/target_model'
+require 'openc3/models/script_status_model'
+require 'openc3/utilities/target_file'
+require_relative 'service'
+
+# Core's module gates token verification on this global. This service never permits anonymous mode.
+$openc3_authorize = true
+
+module Scenario
+  class Authentication
+    include OpenC3::Authorization
+
+    def authorize!(permission:, scope:, target:, packet:, token:)
+      Timeout.timeout(5) do
+        authorize(permission: permission, scope: scope, target_name: target, packet_name: packet, token: token, manual: false)
+      end
+    rescue OpenC3::AuthError
+      raise Error.new('unauthenticated', nil, 401)
+    rescue OpenC3::ForbiddenError
+      raise Error.new('forbidden', nil, 403)
+    rescue StandardError
+      raise Error.new('authorization_unavailable', nil, 503)
+    end
+  end
+
+  class OpenC3Adapter
+    MAX_STATUS_SCAN = 1000
+    def initialize(script_api_url:, public_api_url:, policy_path: File.expand_path('../../config/safety_policy.json', __dir__))
+      @script_api_url = safe_url(script_api_url)
+      @public_api_url = safe_url(public_api_url).to_s.sub(%r{/$}, '')
+      raise Error.new('invalid_policy') if File.size(policy_path) > 65_536
+      @policy = JSON.parse(File.read(policy_path, encoding: 'UTF-8'))
+      raise Error.new('invalid_policy') unless @policy['version'] == 1
+    end
+
+    def validate_definition!(scope, target, definition)
+      raise Error.new('unsupported_target') unless @policy.fetch('allowedTargets').include?(target)
+      Timeout.timeout(8) do
+        definition['steps'].each do |step|
+          if step['type'] == 'command'
+            # Policy is packaged identically with the procedure, not duplicated packet names in code.
+            command_policy = @policy.fetch('commands')[step['packet']]
+            unless command_policy && step['parameters'] == {}
+              raise Error.new('unsupported_command')
+            end
+            packet = OpenC3::TargetModel.packet(target, step['packet'], type: :CMD, scope: scope)
+            unless packet['target_name'] == target && packet['packet_name'] == step['packet'] &&
+                   %w[hazardous disabled hidden].none? { |key| packet[key] }
+              raise Error.new('unsafe_command_definition', nil, 409)
+            end
+            expected = @policy.fetch('headerDefaults').merge('CCSDS_STREAMID' => command_policy.fetch('streamId'))
+            items = packet.fetch('items', []).to_h { |item| [item['name'], item] }
+            expected.each do |name, value|
+              item = items[name]
+              raise Error.new('command_header_mismatch', nil, 409) unless item && item['default'] == value
+            end
+            # Extra hidden/defaulted parameters can change the meaning of an apparently empty command.
+            reserved = OpenC3::Packet::RESERVED_ITEM_NAMES
+            unless (items.keys - expected.keys - reserved).empty? &&
+                   (items.keys & reserved).all? { |name| items[name]['data_type'] == 'DERIVED' } &&
+                   items['CCSDS_STREAMID']['id_value'] == command_policy.fetch('streamId')
+              raise Error.new('command_parameter_mismatch', nil, 409)
+            end
+          elsif step['type'] == 'crcByte'
+            validate_crc_command(scope, target) if step['offset'] == 0
+          elsif step['type'] == 'waitTelemetry'
+            validate_item(scope, target, step)
+          end
+        end
+        definition['telemetryItems'].each { |item| validate_item(scope, target, item) }
+        catalog_text = OpenC3::TargetFile.body(scope, 'SCENARIO_RUNNER/lib/scenarios.json')
+        raise Error.new('installed_definition_missing', nil, 409) unless catalog_text && catalog_text.bytesize <= 262_144
+        installed = JSON.parse(catalog_text).find { |d| d['id'] == definition['id'] }
+        unless installed && Canonical.hash(installed) == Canonical.hash(definition)
+          raise Error.new('installed_definition_mismatch', nil, 409)
+        end
+        policy_text = OpenC3::TargetFile.body(scope, 'SCENARIO_RUNNER/lib/safety_policy.json')
+        unless policy_text && policy_text.bytesize <= 65_536 && Canonical.hash(JSON.parse(policy_text)) == Canonical.hash(@policy)
+          raise Error.new('installed_policy_mismatch', nil, 409)
+        end
+        procedure = OpenC3::TargetFile.body(scope, Service::PROCEDURE)
+        raise Error.new('procedure_missing', nil, 409) unless procedure && procedure.bytesize.between?(1, 65_536)
+      end
+      true
+    rescue Error
+      raise
+    rescue StandardError
+      raise Error.new('installed_definition_unavailable', nil, 503)
+    end
+
+    def launch(run, token)
+      uri = @script_api_url.dup
+      uri.path = "#{uri.path.sub(%r{/$}, '')}/script-api/scripts/#{Service::PROCEDURE}/run"
+      request = Net::HTTP::Post.new(uri)
+      request['Authorization'] = token
+      request['Content-Type'] = 'application/json'
+      environment = {
+        'SCENARIO_RUN_ID' => run['id'], 'SCENARIO_API_URL' => @public_api_url,
+        'SCENARIO_DEFINITION_HASH' => run['definition_hash'], 'SCENARIO_CONTRACT_VERSION' => '1'
+      }.map { |key, value| { 'key' => key, 'value' => value } }
+      request.body = JSON.generate('scope' => run['scope'], 'environment' => environment)
+      http = Net::HTTP.new(uri.host, uri.port, nil)
+      http.use_ssl = uri.scheme == 'https'
+      http.open_timeout, http.read_timeout, http.write_timeout = 3, 5, 3
+      http.max_retries = 0
+      body = +''
+      Timeout.timeout(10) do
+        http.start do |session|
+          session.request(request) do |response|
+            raise Error.new('launch_ambiguous', nil, 503) unless response.code == '200'
+            response.read_body do |part|
+              raise Error.new('launch_ambiguous', nil, 503) if body.bytesize + part.bytesize > 128
+              body << part
+            end
+          end
+        end
+      end
+      body.strip
+    end
+
+    def status(scope, script_id)
+      Timeout.timeout(5) { OpenC3::ScriptStatusModel.get(name: script_id, scope: scope) }
+    end
+
+    def find(run)
+      Timeout.timeout(8) do
+        # Both stores are needed: ScriptStatusModel.update moves completed runs out of running.
+        %w[running completed].flat_map do |type|
+          OpenC3::ScriptStatusModel.all(scope: run['scope'], type: type, offset: 0, limit: MAX_STATUS_SCAN).compact
+        end.select do |status|
+          status.dig('environment', 'SCENARIO_RUN_ID') == run['id']
+        end
+      end
+    end
+
+    def stop(run)
+      # Mirrors running_script_publish in 6.10.1. This is a stop request, never proof of process exit.
+      status_record = status(run['scope'], run['script_id'])
+      unless status_record && status_record['filename'] == Service::PROCEDURE &&
+             status_record.dig('environment', 'SCENARIO_RUN_ID') == run['id'] &&
+             status_record.dig('environment', 'SCENARIO_DEFINITION_HASH') == run['definition_hash']
+        raise Error.new('runner_unverified', nil, 409)
+      end
+      Timeout.timeout(5) { OpenC3::Store.publish("script-api:cmd-running-script-channel:#{run['script_id']}", JSON.generate('stop')) }
+    end
+
+    private
+
+    def validate_item(scope, target, item)
+      packets = @policy.fetch('commands').values.map { |command| command.fetch('telemetryPacket') }
+      unless packets.include?(item['packet']) && @policy.fetch('telemetryItems').include?(item['item'])
+        raise Error.new('unsupported_telemetry')
+      end
+      packet = OpenC3::TargetModel.packet(target, item['packet'], type: :TLM, scope: scope)
+      unless packet['target_name'] == target && packet['packet_name'] == item['packet']
+        raise Error.new('telemetry_definition_mismatch', nil, 409)
+      end
+      items = packet.fetch('items', []).to_h { |i| [i['name'], i] }
+      data = items[item['item']]
+      expected_size = @policy.fetch('telemetryTypes', {}).fetch("#{item['packet']}.#{item['item']}", 8)
+      unless data && data['data_type'] == 'UINT' && data['bit_size'] == expected_size &&
+             %w[RECEIVED_TIMESECONDS RECEIVED_COUNT].all? { |name| items.dig(name, 'data_type') == 'DERIVED' }
+        raise Error.new('telemetry_item_missing', nil, 409)
+      end
+    end
+
+    def validate_crc_command(scope, target)
+      policy = @policy.fetch('crcKeyOracle')
+      %w[checksumSizeItem checksumBusyItem].each do |name|
+        validate_item(scope, target, {'packet' => policy.fetch('checksumPacket'), 'item' => policy.fetch(name)})
+      end
+      packet = OpenC3::TargetModel.packet(target, policy.fetch('command'), type: :CMD, scope: scope)
+      unless packet['target_name'] == target && packet['packet_name'] == policy.fetch('command') &&
+             %w[hazardous disabled hidden].none? { |key| packet[key] }
+        raise Error.new('unsafe_command_definition', nil, 409)
+      end
+      items = packet.fetch('items', []).to_h { |item| [item['name'], item] }
+      expected = @policy.fetch('headerDefaults').merge('CCSDS_STREAMID' => policy.fetch('streamId'))
+      expected.each do |name, value|
+        raise Error.new('command_header_mismatch', nil, 409) unless items.dig(name, 'default') == value
+      end
+      fields = %w[ADDRESS SIZE MAX_BYTES_PER_CYCLE]
+      reserved = OpenC3::Packet::RESERVED_ITEM_NAMES
+      unless (items.keys - expected.keys - reserved).sort == fields.sort &&
+             fields.all? { |name| items.dig(name, 'data_type') == 'UINT' && items.dig(name, 'bit_size') == 32 } &&
+             (items.keys & reserved).all? { |name| items[name]['data_type'] == 'DERIVED' } &&
+             items.dig('CCSDS_STREAMID', 'id_value') == policy.fetch('streamId')
+        raise Error.new('command_parameter_mismatch', nil, 409)
+      end
+    end
+
+    def safe_url(value)
+      uri = URI.parse(value)
+      raise Error.new('invalid_service_url') unless %w[http https].include?(uri.scheme) && uri.host && !uri.userinfo && !uri.query && !uri.fragment
+      uri
+    end
+  end
+end
