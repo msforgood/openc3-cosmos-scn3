@@ -8,7 +8,7 @@ require 'net/http'
 require_relative 'bounded-process'
 
 module ScenarioBootstrap
-  RELEASE = '1.0.9'.freeze
+  RELEASE = '1.0.11'.freeze
   CORE_VERSION = '6.10.1'.freeze
   NAMES = %w[openc3-cosmos-cfs-scenario-runner openc3-cosmos-tool-scenariorunner].freeze
   REQUIRED = {
@@ -214,8 +214,8 @@ module ScenarioBootstrap
     end
 
     def plan(installed)
-      if @upgrade_from && (@upgrade_from != '1.0.8' || @artifacts.version != RELEASE)
-        raise Failure, 'Only explicit SCENARIO_UPGRADE_FROM=1.0.8 to release 1.0.9 is supported; no downgrade is allowed'
+      if @upgrade_from && (!%w[1.0.9 1.0.10].include?(@upgrade_from) || @artifacts.version != RELEASE)
+        raise Failure, 'Only explicit SCENARIO_UPGRADE_FROM=1.0.9 or 1.0.10 to release 1.0.11 is supported; no downgrade is allowed'
       end
       if NAMES.all? { |name| matching(installed, name, @artifacts.version) }
         NAMES.each do |name|

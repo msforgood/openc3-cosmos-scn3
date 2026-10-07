@@ -41,8 +41,8 @@ module Scenario
       { 'name' => 120, 'description' => 1000 }.each { |key, max| check(d[key].is_a?(String) && d[key].length.between?(1, max)) }
       check(d['supportedTargets'].is_a?(Array) && d['supportedTargets'].size == 1 && @policy.fetch('allowedTargets').include?(d['supportedTargets'][0]))
       if d['supportedTargets'][0] == 'CFS-1_BBB'
-        check(d['id'] == @policy.fetch('tcLogTraversal').fetch('scenarioIds').fetch('CFS-1_BBB') &&
-              d['steps'].is_a?(Array) && d['steps'].any? { |step| step.is_a?(Hash) && step['type'] == 'tcLogPhase' })
+        check([@policy.fetch('tcLogTraversal').fetch('scenarioIds').fetch('CFS-1_BBB'),
+               @policy.fetch('pspIndirectWrite').fetch('scenarioIds').fetch('CFS-1_BBB')].include?(d['id']))
       end
       number!(d['timeoutSec'], 1, 120)
       check(d['successCriteria'] == { 'type' => 'allStepsSucceeded', 'requireFreshTelemetry' => true })
@@ -53,6 +53,7 @@ module Scenario
       check(d['steps'].map { |s| s['id'] }.uniq.size == d['steps'].size)
       return validate_crc_oracle!(d, refs) if d['steps'].any? { |s| %w[resolveAddress crcByte].include?(s['type']) }
       return validate_tc_log!(d, refs) if d['steps'].any? { |s| s['type'] == 'tcLogPhase' }
+      return validate_psp!(d, refs) if d['steps'].any? { |s| s['type'] == 'pspPhase' }
       pending, waited, total, commands = [], [], 0, 0
       d['steps'].each do |s|
         definition_id!(s['id'])
@@ -122,6 +123,21 @@ module Scenario
       definition['steps'].zip(phases).each do |step, phase|
         keys!(step, %w[id type phase])
         check(step == {'id' => phase, 'type' => 'tcLogPhase', 'phase' => phase})
+      end
+    end
+
+    def validate_psp!(definition, refs)
+      policy = @policy.fetch('pspIndirectWrite')
+      target = definition['supportedTargets'].first
+      check(definition['id'] == policy.fetch('scenarioIds')[target] && definition['timeoutSec'] == 120)
+      check(refs.sort == [['MM_DEBUG', 'STATUS'], ['MM_DEBUG', 'POINTER_SLOT'],
+                          ['PAYLOAD_PULSE_STATE', 'STATE'], ['PAYLOAD_PULSE_STATE', 'FEED_TARGET_ADDRESS'],
+                          ['PAYLOAD_CTRL_STATE', 'FAULT'], ['PAYLOAD_CTRL_STATE', 'HALT_ACKED']].sort)
+      phases = policy.fetch('phases')
+      check(definition['steps'].size == phases.size)
+      definition['steps'].zip(phases).each do |step, phase|
+        keys!(step, %w[id type phase])
+        check(step == {'id' => phase, 'type' => 'pspPhase', 'phase' => phase})
       end
     end
 

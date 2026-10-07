@@ -133,13 +133,13 @@ services:
         docs: "docs.openc3.com"
       network: host
       args:
-        SCENARIO_VERSION: ${SCENARIO_VERSION:-1.0.9}
+        SCENARIO_VERSION: ${SCENARIO_VERSION:-1.0.11}
         NPM_URL: ${NPM_URL}
         OPENC3_DEPENDENCY_REGISTRY: ${OPENC3_DEPENDENCY_REGISTRY}
         OPENC3_REGISTRY: ${OPENC3_REGISTRY}
         OPENC3_NAMESPACE: ${OPENC3_NAMESPACE}
         OPENC3_TAG: ${OPENC3_TAG}
-    image: local/openc3-cosmos-init:6.10.1-scenario-${SCENARIO_VERSION:-1.0.9}
+    image: local/openc3-cosmos-init:6.10.1-scenario-${SCENARIO_VERSION:-1.0.11}
     depends_on:
       - "openc3-node"
       - "openc3-base"

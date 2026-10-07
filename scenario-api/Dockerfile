@@ -1,6 +1,6 @@
 ARG OPENC3_BASE_IMAGE=openc3inc/openc3-cosmos-script-runner-api:6.10.1
 FROM ${OPENC3_BASE_IMAGE}
-ARG SCENARIO_VERSION=1.0.9
+ARG SCENARIO_VERSION=1.0.11
 USER root
 WORKDIR /scenario-api
 RUN apk add --no-cache sqlite-libs sqlite-dev build-base

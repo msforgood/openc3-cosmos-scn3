@@ -10,7 +10,7 @@ module Scenario
     RUNNER_TERMINAL = %w[completed completed_errors stopped crashed killed].freeze
     PUBLIC_FIELDS = %w[id scope target scenario_id definition_version definition_hash request_id state script_id created_at updated_at deadline stop_requested termination_confirmed prompt result error].freeze
     CALLBACK_TYPES = %w[started step log prompt result].freeze
-    DATA_KEYS = %w[step_id status commandAccepted telemetryConfirmed authenticated packet item value received_at message prompt_id choices deadline level file_index file_size before_text before_hex after_hex photo_bytes active_index total_logged write_errors filename].freeze
+    DATA_KEYS = %w[step_id status commandAccepted telemetryConfirmed authenticated packet item value received_at message prompt_id choices deadline level file_index file_size before_text before_hex after_hex photo_bytes active_index total_logged write_errors filename kick_address mode_address mode_before mode_after pulse_count module_start module_end pointer_slot denied_address debug_status pointer_before pointer_after byte_before byte_after pulse_target fault_count halt_acked es_event_id es_event_message].freeze
 
     def initialize(store:, catalog:, backend:, auth:, clock: -> { Time.now.utc }, max_active: 4)
       @store, @catalog, @backend, @auth, @clock, @max_active = store, catalog, backend, auth, clock, max_active
@@ -70,6 +70,12 @@ module Scenario
         %w[CI_LOG_STATUS_CMD CI_LOG_SEAL_CMD CI_LOG_READ_CMD TC_CAMERA_CAPTURE_CMD CFE_ES_SEND_HK_CMD].each do |packet|
           authorize!(scope, target, token, 'cmd', packet)
         end
+      end
+      if d['steps'].any? { |step| step['type'] == 'pspPhase' }
+        %w[MM_CMD_DEBUG_MAP MM_CMD_DEBUG_READ MM_CMD_DEBUG_WRITE PAYLOAD_PULSE_PAUSE_CMD PAYLOAD_PULSE_RESUME_CMD PAYLOAD_PULSE_STATUS_CMD PAYLOAD_CTRL_STATUS_CMD].each do |packet|
+          authorize!(scope, target, token, 'cmd', packet)
+        end
+        authorize!(scope, target, token, 'tlm', 'CFE_EVS_LONG_EVENT_MSG')
       end
       d['telemetryItems'].each { |t| authorize!(scope, target, token, 'tlm', t['packet']) }
       @backend.validate_definition!(scope, target, d)

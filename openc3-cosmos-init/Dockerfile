@@ -133,7 +133,7 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-docs", "/ope
 
 # Scenario keeps its independent release version and procedure-only Ruby package.
 FROM openc3-frontend-tmp AS openc3-scenario
-ARG SCENARIO_VERSION=1.0.9
+ARG SCENARIO_VERSION=1.0.11
 COPY ./plugins/packages/openc3-cosmos-tool-scenariorunner/ packages/openc3-cosmos-tool-scenariorunner/
 RUN /openc3/plugins/docker-package-build.sh openc3-cosmos-tool-scenariorunner "" "${SCENARIO_VERSION}"
 COPY ./plugins/packages/openc3-cosmos-cfs-scenario-runner/ packages/openc3-cosmos-cfs-scenario-runner/
@@ -143,7 +143,7 @@ RUN cd packages/openc3-cosmos-cfs-scenario-runner \
   && ruby build_manifest.rb "${SCENARIO_VERSION}" /openc3/plugins/gems targets/SCENARIO_RUNNER/lib
 
 FROM ${OPENC3_REGISTRY}/${OPENC3_NAMESPACE}/${OPENC3_BASE_IMAGE}:${OPENC3_TAG}
-ARG SCENARIO_VERSION=1.0.9
+ARG SCENARIO_VERSION=1.0.11
 ENV SCENARIO_VERSION=${SCENARIO_VERSION}
 
 # System gems remain visible when the deployment mounts /gems and sets GEM_HOME.

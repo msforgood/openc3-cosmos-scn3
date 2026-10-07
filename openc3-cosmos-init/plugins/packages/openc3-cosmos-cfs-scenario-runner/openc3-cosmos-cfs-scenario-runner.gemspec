@@ -1,6 +1,6 @@
 Gem::Specification.new do |spec|
   spec.name = 'openc3-cosmos-cfs-scenario-runner'
-  spec.version = ENV.fetch('VERSION', '1.0.9')
+  spec.version = ENV.fetch('VERSION', '1.0.11')
   spec.summary = 'Bounded QEMU housekeeping scenarios for OpenC3 6.10.1'
   spec.description = 'Independent procedure-only plugin using existing CFS command and telemetry APIs.'
   spec.authors = ['CFS Scenario Runner maintainers']
