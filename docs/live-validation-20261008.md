@@ -37,3 +37,42 @@ on its USB link, but the OpenC3 operator receive counter stayed at zero.
 BBB receive traffic; the Scenario Runner BBB housekeeping screen then showed
 live packets. This is a recovery observation, not a definitive diagnosis of
 the Docker Desktop UDP forwarding internals.
+
+## Subsequent Runner 1.0.14 and XKEY flag validation
+
+OpenC3 was upgraded to Scenario Runner 1.0.14. Its init exited 0, the
+Scenario API was healthy, the Runner URL returned HTTP 200, and the API
+listed eight definitions. Both flight targets' TM and X-band interface
+receive counters increased. The focused CRC tests passed 8/8 and the Runner
+UI component tests passed 19/19.
+
+The initial BBB 1.0.14 CRC run recovered all 16 key bytes but failed its
+final `xband_payload_invalid` check. The new Runner expected a decrypted
+`flag{crc_oracle}` payload while both deployed XKEY modules still encrypted
+the older synthetic housekeeping payload. The updated ARM XKEY module was
+built for each target, deployed with the previous module backed up, and
+verified by SHA-256 and the new flag payload in the binary. No existing TC
+log or photo was removed.
+
+| Target | Scenario | Successful steps | 1.0.14 run ID |
+| --- | --- | ---: | --- |
+| QEMU | CS CRC key recovery and X-band flag | 18/18 | `6a171a36-862f-41f4-8974-818a5214ffa6` |
+| QEMU | TC log overwritten by camera path traversal | 7/7 | `d9b2825b-e5b1-45ab-969d-5b0c81508fa6` |
+| QEMU | MM pointer edit causes controller APP_ERROR exit | 11/11 | `8055c3a1-4ba6-4b72-a81b-d64d9013027d` |
+| BBB | CS CRC key recovery and X-band flag | 18/18 | `7f075db4-402c-4e48-985b-bdf213bd0380` |
+| BBB | TC log overwritten by camera path traversal | 7/7 | `c58f1807-e98a-4088-800c-29db74f60f24` |
+| BBB | MM pointer edit causes controller APP_ERROR exit | 11/11 | `9c565783-2ade-40b1-8a70-bae77a4b0fcc` |
+
+The successful X-band steps authenticated a fresh AES-GCM frame and
+decrypted `flag{crc_oracle}` on both targets. The recovered per-start keys
+are in the restricted lab run results and are intentionally omitted here.
+The 1.0.14 UI component tests cover key and flag rendering; a separate
+browser automation check was blocked by the browser tool's URL policy, so
+the post-upgrade page was verified by HTTP/API response rather than a visual
+browser inspection.
+
+After the scenario 3 runs, both cFS targets were restarted to restore
+`PAYLOAD_CTRL_APP` for another demonstration. Existing TC logs and photos
+were preserved, the new XKEY module remained deployed, and TO_LAB was
+re-enabled. Both targets' ordinary TM and X-band receive counters increased;
+the controller and pulse apps reported their normal ready states.
