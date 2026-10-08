@@ -1,24 +1,100 @@
 {
   "version": 1,
-  "allowedTargets": ["CFS-1_QEMU", "CFS-1_BBB"],
+  "allowedTargets": [
+    "CFS-1_QEMU",
+    "CFS-1_BBB"
+  ],
   "commands": {
-    "CFE_ES_SEND_HK_CMD": {"telemetryPacket": "CFE_ES_HK", "streamId": 6152},
-    "CFE_EVS_SEND_HK_CMD": {"telemetryPacket": "CFE_EVS_HK", "streamId": 6153},
-    "XKEY_SEND_HK_CMD": {"telemetryPacket": "XKEY_HK", "streamId": 6306},
-    "CS_SEND_HK_CMD": {"telemetryPacket": "CS_HK", "streamId": 6353},
-    "CI_LOG_STATUS_CMD": {"telemetryPacket": "CI_LOG_STATUS", "streamId": 6276},
-    "CI_LOG_SEAL_CMD": {"telemetryPacket": "CI_LOG_STATUS", "streamId": 6276},
-    "CI_LOG_READ_CMD": {"telemetryPacket": "CI_LOG_CHUNK", "streamId": 6276},
-    "TC_CAMERA_CAPTURE_CMD": {"telemetryPacket": "TC_CAMERA_RESULT", "streamId": 6370},
-    "MM_CMD_DEBUG_MAP": {"telemetryPacket": "MM_DEBUG", "streamId": 6374},
-    "MM_CMD_DEBUG_READ": {"telemetryPacket": "MM_DEBUG", "streamId": 6374},
-    "MM_CMD_DEBUG_WRITE": {"telemetryPacket": "MM_DEBUG", "streamId": 6374},
-    "PAYLOAD_PULSE_PAUSE_CMD": {"telemetryPacket": "PAYLOAD_PULSE_STATE", "streamId": 6372},
-    "PAYLOAD_PULSE_RESUME_CMD": {"telemetryPacket": "PAYLOAD_PULSE_STATE", "streamId": 6372},
-    "PAYLOAD_PULSE_STATUS_CMD": {"telemetryPacket": "PAYLOAD_PULSE_STATE", "streamId": 6372},
-    "PAYLOAD_CTRL_STATUS_CMD": {"telemetryPacket": "PAYLOAD_CTRL_STATE", "streamId": 6373}
+    "CFE_ES_SEND_HK_CMD": {
+      "telemetryPacket": "CFE_ES_HK",
+      "streamId": 6152
+    },
+    "CFE_EVS_SEND_HK_CMD": {
+      "telemetryPacket": "CFE_EVS_HK",
+      "streamId": 6153
+    },
+    "XKEY_SEND_HK_CMD": {
+      "telemetryPacket": "XKEY_HK",
+      "streamId": 6306
+    },
+    "CS_SEND_HK_CMD": {
+      "telemetryPacket": "CS_HK",
+      "streamId": 6353
+    },
+    "CI_LOG_STATUS_CMD": {
+      "telemetryPacket": "CI_LOG_STATUS",
+      "streamId": 6276
+    },
+    "CI_LOG_SEAL_CMD": {
+      "telemetryPacket": "CI_LOG_STATUS",
+      "streamId": 6276
+    },
+    "CI_LOG_READ_CMD": {
+      "telemetryPacket": "CI_LOG_CHUNK",
+      "streamId": 6276
+    },
+    "TC_CAMERA_CAPTURE_CMD": {
+      "telemetryPacket": "TC_CAMERA_RESULT",
+      "streamId": 6370
+    },
+    "MM_CMD_DEBUG_MAP": {
+      "telemetryPacket": "MM_DEBUG",
+      "streamId": 6374
+    },
+    "MM_CMD_DEBUG_READ": {
+      "telemetryPacket": "MM_DEBUG",
+      "streamId": 6374
+    },
+    "MM_CMD_DEBUG_WRITE": {
+      "telemetryPacket": "MM_DEBUG",
+      "streamId": 6374
+    },
+    "PAYLOAD_PULSE_PAUSE_CMD": {
+      "telemetryPacket": "PAYLOAD_PULSE_STATE",
+      "streamId": 6372
+    },
+    "PAYLOAD_PULSE_RESUME_CMD": {
+      "telemetryPacket": "PAYLOAD_PULSE_STATE",
+      "streamId": 6372
+    },
+    "PAYLOAD_PULSE_STATUS_CMD": {
+      "telemetryPacket": "PAYLOAD_PULSE_STATE",
+      "streamId": 6372
+    },
+    "PAYLOAD_CTRL_STATUS_CMD": {
+      "telemetryPacket": "PAYLOAD_CTRL_STATE",
+      "streamId": 6373
+    }
   },
-  "telemetryItems": ["COMMAND_COUNTER", "COMMAND_ERROR_COUNTER", "KEY_ADDRESS", "KEY_LENGTH", "CHANNEL_READY", "LAST_ONE_SHOT_ADDRESS", "LAST_ONE_SHOT_SIZE", "LAST_ONE_SHOT_CHECKSUM", "ONE_SHOT_IN_PROGRESS", "RESULT", "STATUS", "POINTER_SLOT", "FEED_TARGET_ADDRESS", "STATE", "FAULT", "HALT_ACKED"],
+  "telemetryItems": [
+    "COMMAND_COUNTER",
+    "COMMAND_ERROR_COUNTER",
+    "KEY_ADDRESS",
+    "KEY_LENGTH",
+    "CHANNEL_READY",
+    "LAST_ONE_SHOT_ADDRESS",
+    "LAST_ONE_SHOT_SIZE",
+    "LAST_ONE_SHOT_CHECKSUM",
+    "ONE_SHOT_IN_PROGRESS",
+    "RESULT",
+    "STATUS",
+    "POINTER_SLOT",
+    "FEED_TARGET_ADDRESS",
+    "STATE",
+    "FAULT",
+    "HALT_ACKED",
+    "MAGIC",
+    "IV_PREFIX",
+    "COUNTER",
+    "CIPHERTEXT_0",
+    "CIPHERTEXT_1",
+    "CIPHERTEXT_2",
+    "CIPHERTEXT_3",
+    "TAG_0",
+    "TAG_1",
+    "TAG_2",
+    "TAG_3"
+  ],
   "telemetryTypes": {
     "XKEY_HK.KEY_ADDRESS": 32,
     "XKEY_HK.KEY_LENGTH": 32,
@@ -35,22 +111,83 @@
     "PAYLOAD_PULSE_STATE.STATE": 8,
     "PAYLOAD_PULSE_STATE.FEED_TARGET_ADDRESS": 32,
     "PAYLOAD_CTRL_STATE.FAULT": 8,
-    "PAYLOAD_CTRL_STATE.HALT_ACKED": 8
+    "PAYLOAD_CTRL_STATE.HALT_ACKED": 8,
+    "CS_HK.COMMAND_COUNTER": 8,
+    "CS_HK.COMMAND_ERROR_COUNTER": 8,
+    "XBAND_FRAME.MAGIC": 32,
+    "XBAND_FRAME.IV_PREFIX": 32,
+    "XBAND_FRAME.COUNTER": 64,
+    "XBAND_FRAME.CIPHERTEXT_0": 32,
+    "XBAND_FRAME.CIPHERTEXT_1": 32,
+    "XBAND_FRAME.CIPHERTEXT_2": 32,
+    "XBAND_FRAME.CIPHERTEXT_3": 32,
+    "XBAND_FRAME.TAG_0": 32,
+    "XBAND_FRAME.TAG_1": 32,
+    "XBAND_FRAME.TAG_2": 32,
+    "XBAND_FRAME.TAG_3": 32
   },
   "tcLogTraversal": {
-    "phases": ["seal-baseline", "record-normal", "seal-target", "read-before", "overwrite-log", "read-after", "confirm-continuity"],
-    "scenarioIds": {"CFS-1_QEMU": "qemu-tc-log-photo-traversal", "CFS-1_BBB": "bbb-tc-log-photo-traversal"},
-    "commandPackets": ["CI_LOG_STATUS_CMD", "CI_LOG_SEAL_CMD", "CI_LOG_READ_CMD", "TC_CAMERA_CAPTURE_CMD", "CFE_ES_SEND_HK_CMD"],
-    "telemetryPackets": ["CI_LOG_STATUS", "CI_LOG_CHUNK", "TC_CAMERA_RESULT"],
+    "phases": [
+      "seal-baseline",
+      "record-normal",
+      "seal-target",
+      "read-before",
+      "overwrite-log",
+      "read-after",
+      "confirm-continuity"
+    ],
+    "scenarioIds": {
+      "CFS-1_QEMU": "qemu-tc-log-photo-traversal",
+      "CFS-1_BBB": "bbb-tc-log-photo-traversal"
+    },
+    "commandPackets": [
+      "CI_LOG_STATUS_CMD",
+      "CI_LOG_SEAL_CMD",
+      "CI_LOG_READ_CMD",
+      "TC_CAMERA_CAPTURE_CMD",
+      "CFE_ES_SEND_HK_CMD"
+    ],
+    "telemetryPackets": [
+      "CI_LOG_STATUS",
+      "CI_LOG_CHUNK",
+      "TC_CAMERA_RESULT"
+    ],
     "maxChunkBytes": 256,
     "normalFilename": "orbit.png",
     "imageSignatureHex": "89504e470d0a1a0a"
   },
   "pspIndirectWrite": {
-    "phases": ["baseline", "map", "deny-direct-write", "pause", "read-pointer", "write-pointer-byte", "verify-pointer", "resume", "observe-fault", "confirm-es-exit", "confirm-pulse"],
-    "scenarioIds": {"CFS-1_QEMU": "qemu-psp-mm-indirect-write", "CFS-1_BBB": "bbb-psp-mm-indirect-write"},
-    "commandPackets": ["MM_CMD_DEBUG_MAP", "MM_CMD_DEBUG_READ", "MM_CMD_DEBUG_WRITE", "PAYLOAD_PULSE_PAUSE_CMD", "PAYLOAD_PULSE_RESUME_CMD", "PAYLOAD_PULSE_STATUS_CMD", "PAYLOAD_CTRL_STATUS_CMD"],
-    "telemetryPackets": ["MM_DEBUG", "PAYLOAD_PULSE_STATE", "PAYLOAD_CTRL_STATE"],
+    "phases": [
+      "baseline",
+      "map",
+      "deny-direct-write",
+      "pause",
+      "read-pointer",
+      "write-pointer-byte",
+      "verify-pointer",
+      "resume",
+      "observe-fault",
+      "confirm-es-exit",
+      "confirm-pulse"
+    ],
+    "scenarioIds": {
+      "CFS-1_QEMU": "qemu-psp-mm-indirect-write",
+      "CFS-1_BBB": "bbb-psp-mm-indirect-write"
+    },
+    "commandPackets": [
+      "MM_CMD_DEBUG_MAP",
+      "MM_CMD_DEBUG_READ",
+      "MM_CMD_DEBUG_WRITE",
+      "PAYLOAD_PULSE_PAUSE_CMD",
+      "PAYLOAD_PULSE_RESUME_CMD",
+      "PAYLOAD_PULSE_STATUS_CMD",
+      "PAYLOAD_CTRL_STATUS_CMD"
+    ],
+    "telemetryPackets": [
+      "MM_DEBUG",
+      "PAYLOAD_PULSE_STATE",
+      "PAYLOAD_CTRL_STATE"
+    ],
     "eventPacket": "CFE_EVS_LONG_EVENT_MSG",
     "esExitEventId": 14,
     "pointerBytes": 4,
@@ -58,8 +195,13 @@
     "expectedModeLowByte": 255
   },
   "crcKeyOracle": {
+    "scenarioTargets": {
+      "qemu-cs-crc-key-oracle": "CFS-1_QEMU",
+      "bbb-cs-crc-key-oracle": "CFS-1_BBB"
+    },
     "command": "CS_CMD_ONE_SHOT",
     "streamId": 6352,
+    "functionCode": 2,
     "keyPacket": "XKEY_HK",
     "keyAddressItem": "KEY_ADDRESS",
     "keyLengthItem": "KEY_LENGTH",
@@ -69,7 +211,23 @@
     "checksumSizeItem": "LAST_ONE_SHOT_SIZE",
     "checksumValueItem": "LAST_ONE_SHOT_CHECKSUM",
     "checksumBusyItem": "ONE_SHOT_IN_PROGRESS",
-    "keyBytes": 16
+    "checksumCommandCounterItem": "COMMAND_COUNTER",
+    "checksumErrorCounterItem": "COMMAND_ERROR_COUNTER",
+    "keyBytes": 16,
+    "xbandPacket": "XBAND_FRAME",
+    "xbandTargets": {
+      "CFS-1_QEMU": "CFS-1_QEMU_XBAND",
+      "CFS-1_BBB": "CFS-1_BBB_XBAND"
+    },
+    "xbandMagic": 1480737841
   },
-  "headerDefaults": {"CCSDS_SEQUENCE": 49152, "CCSDS_LENGTH": 1, "CCSDS_FC": 0, "CCSDS_CHECKSUM": 0}
+  "headerDefaults": {
+    "CCSDS_SEQUENCE": 49152,
+    "CCSDS_LENGTH": 1,
+    "CCSDS_FC": 0,
+    "CCSDS_CHECKSUM": 0
+  },
+  "passiveTelemetryPackets": [
+    "XBAND_FRAME"
+  ]
 }

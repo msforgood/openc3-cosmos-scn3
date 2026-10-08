@@ -31,10 +31,10 @@
             </li>
           </ol>
         </div>
-        <div v-if="recoveredKey" class="scenario-preview" data-test="recovered-key">
-          <strong>Recovered X-band lab key</strong>
-          <p><code>{{ recoveredKey }}</code></p>
-          <p class="muted small">16 one-byte CRC responses reconstructed this key. Use the isolated channel verifier to confirm it.</p>
+        <div v-if="isCrcScenario && matchesRun" class="scenario-preview" data-test="xband-evidence">
+          <strong>X-band frame verification</strong>
+          <p>{{ displaySteps['verify-xband-frame']?.message || 'Waiting for a fresh encrypted frame after the 16 CRC probes.' }}</p>
+          <p class="muted small">The recovered key stays inside the running procedure and is not stored in the run result.</p>
         </div>
         <TcLogEvidence v-if="isTcLogScenario" :steps="displaySteps" />
         <PspEvidence v-if="isPspScenario" :steps="displaySteps" />
@@ -106,7 +106,7 @@ const matchesRun = computed(() => runMatchesScenario(state.run, selectedScenario
 const displaySteps = computed(() => matchesRun.value ? state.steps : {})
 const displayStatus = computed(() => state.run && !matchesRun.value && !locked.value ? 'ready' : state.status)
 const completedSteps = computed(() => selectedScenario.value?.steps.filter((step) => displaySteps.value[step.id]?.status === 'succeeded').length || 0)
-const recoveredKey = computed(() => matchesRun.value ? /^Recovered X-band lab key: ([0-9a-f]{32})$/.exec(state.run?.result?.message || '')?.[1] || '' : '')
+const isCrcScenario = computed(() => ['qemu-cs-crc-key-oracle', 'bbb-cs-crc-key-oracle'].includes(selectedScenario.value?.id))
 const isTcLogScenario = computed(() => ['qemu-tc-log-photo-traversal', 'bbb-tc-log-photo-traversal'].includes(selectedScenario.value?.id))
 const isPspScenario = computed(() => ['qemu-psp-mm-indirect-write', 'bbb-psp-mm-indirect-write'].includes(selectedScenario.value?.id))
 const elapsed = computed(() => {
@@ -156,6 +156,7 @@ function stepDescription(step) {
   if (step.type === 'waitTelemetry') return `Wait for ${step.packet}.${step.item} ${step.operator} ${step.value} · timeout ${step.timeoutSec}s`
   if (step.type === 'resolveAddress') return 'Read key location and channel status from XKEY_HK'
   if (step.type === 'crcByte') return `CS OneShot: offset ${step.offset}, size 1 · confirm fresh CS_HK and invert CRC`
+  if (step.type === 'verifyXbandFrame') return 'Receive a fresh X-band UDP frame and authenticate/decrypt it with the recovered key'
   if (step.type === 'tcLogPhase') return ({
     'seal-baseline': 'Close the previous onboard log and start a fresh file',
     'record-normal': 'Send a housekeeping TC and save a normal photo',

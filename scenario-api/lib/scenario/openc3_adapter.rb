@@ -70,6 +70,8 @@ module Scenario
             end
           elsif step['type'] == 'crcByte'
             validate_crc_command(scope, target) if step['offset'] == 0
+          elsif step['type'] == 'verifyXbandFrame'
+            validate_xband_packet(scope, target)
           elsif step['type'] == 'waitTelemetry'
             validate_item(scope, target, step)
           end
@@ -269,12 +271,14 @@ module Scenario
     end
 
     def validate_item(scope, target, item)
-      packets = @policy.fetch('commands').values.map { |command| command.fetch('telemetryPacket') }
+      packets = @policy.fetch('commands').values.map { |command| command.fetch('telemetryPacket') } +
+                @policy.fetch('passiveTelemetryPackets')
       unless packets.include?(item['packet']) && @policy.fetch('telemetryItems').include?(item['item'])
         raise Error.new('unsupported_telemetry')
       end
-      packet = OpenC3::TargetModel.packet(target, item['packet'], type: :TLM, scope: scope)
-      unless packet['target_name'] == target && packet['packet_name'] == item['packet']
+      telemetry_target = xband_target(target, item['packet'])
+      packet = OpenC3::TargetModel.packet(telemetry_target, item['packet'], type: :TLM, scope: scope)
+      unless packet['target_name'] == telemetry_target && packet['packet_name'] == item['packet']
         raise Error.new('telemetry_definition_mismatch', nil, 409)
       end
       items = packet.fetch('items', []).to_h { |i| [i['name'], i] }
@@ -288,7 +292,7 @@ module Scenario
 
     def validate_crc_command(scope, target)
       policy = @policy.fetch('crcKeyOracle')
-      %w[checksumSizeItem checksumBusyItem].each do |name|
+      %w[checksumSizeItem checksumBusyItem checksumCommandCounterItem checksumErrorCounterItem].each do |name|
         validate_item(scope, target, {'packet' => policy.fetch('checksumPacket'), 'item' => policy.fetch(name)})
       end
       packet = OpenC3::TargetModel.packet(target, policy.fetch('command'), type: :CMD, scope: scope)
@@ -297,7 +301,8 @@ module Scenario
         raise Error.new('unsafe_command_definition', nil, 409)
       end
       items = packet.fetch('items', []).to_h { |item| [item['name'], item] }
-      expected = @policy.fetch('headerDefaults').merge('CCSDS_STREAMID' => policy.fetch('streamId'))
+      expected = @policy.fetch('headerDefaults').merge('CCSDS_STREAMID' => policy.fetch('streamId'),
+                                                        'CCSDS_FC' => policy.fetch('functionCode'))
       expected.each do |name, value|
         raise Error.new('command_header_mismatch', nil, 409) unless items.dig(name, 'default') == value
       end
@@ -309,6 +314,31 @@ module Scenario
              items.dig('CCSDS_STREAMID', 'id_value') == policy.fetch('streamId')
         raise Error.new('command_parameter_mismatch', nil, 409)
       end
+    end
+
+    def validate_xband_packet(scope, target)
+      policy = @policy.fetch('crcKeyOracle')
+      packet_name = policy.fetch('xbandPacket')
+      telemetry_target = xband_target(target, packet_name)
+      packet = OpenC3::TargetModel.packet(telemetry_target, packet_name, type: :TLM, scope: scope)
+      unless packet['target_name'] == telemetry_target && packet['packet_name'] == packet_name
+        raise Error.new('telemetry_definition_mismatch', nil, 409)
+      end
+      fields = %w[MAGIC IV_PREFIX COUNTER CIPHERTEXT_0 CIPHERTEXT_1 CIPHERTEXT_2 CIPHERTEXT_3 TAG_0 TAG_1 TAG_2 TAG_3]
+      items = packet.fetch('items', []).to_h { |item| [item['name'], item] }
+      reserved = OpenC3::Packet::RESERVED_ITEM_NAMES
+      unless (items.keys - reserved).sort == fields.sort &&
+             items.dig('MAGIC', 'id_value') == policy.fetch('xbandMagic') &&
+             fields.all? { |field| items.dig(field, 'data_type') == 'UINT' &&
+               items.dig(field, 'bit_size') == @policy.fetch('telemetryTypes').fetch("#{packet_name}.#{field}") }
+        raise Error.new('telemetry_definition_mismatch', nil, 409)
+      end
+    end
+
+    def xband_target(target, packet_name)
+      oracle = @policy.fetch('crcKeyOracle')
+      return target unless packet_name == oracle.fetch('xbandPacket')
+      oracle.fetch('xbandTargets').fetch(target)
     end
 
     def safe_url(value)

@@ -1,6 +1,6 @@
 {
   "name": "@openc3/cosmos-tool-scenariorunner",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "private": true,
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.txt",

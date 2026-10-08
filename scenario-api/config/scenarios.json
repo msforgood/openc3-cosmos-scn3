@@ -5,14 +5,39 @@
     "version": "1.0.0",
     "name": "QEMU executive services housekeeping",
     "description": "Request CFE_ES housekeeping once and confirm a newly received housekeeping packet. A fresh packet confirms telemetry reception, not exclusive attribution to this request.",
-    "supportedTargets": ["CFS-1_QEMU"],
+    "supportedTargets": [
+      "CFS-1_QEMU"
+    ],
     "timeoutSec": 30,
     "steps": [
-      {"id": "request-hk", "type": "command", "packet": "CFE_ES_SEND_HK_CMD", "parameters": {}, "timeoutSec": 3},
-      {"id": "confirm-hk", "type": "waitTelemetry", "packet": "CFE_ES_HK", "item": "COMMAND_COUNTER", "operator": "gte", "value": 0, "timeoutSec": 10, "pollIntervalSec": 0.5}
+      {
+        "id": "request-hk",
+        "type": "command",
+        "packet": "CFE_ES_SEND_HK_CMD",
+        "parameters": {},
+        "timeoutSec": 3
+      },
+      {
+        "id": "confirm-hk",
+        "type": "waitTelemetry",
+        "packet": "CFE_ES_HK",
+        "item": "COMMAND_COUNTER",
+        "operator": "gte",
+        "value": 0,
+        "timeoutSec": 10,
+        "pollIntervalSec": 0.5
+      }
     ],
-    "telemetryItems": [{"packet": "CFE_ES_HK", "item": "COMMAND_COUNTER"}],
-    "successCriteria": {"type": "allStepsSucceeded", "requireFreshTelemetry": true}
+    "telemetryItems": [
+      {
+        "packet": "CFE_ES_HK",
+        "item": "COMMAND_COUNTER"
+      }
+    ],
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
   },
   {
     "schemaVersion": 1,
@@ -20,15 +45,44 @@
     "version": "1.0.0",
     "name": "QEMU event services housekeeping",
     "description": "Request CFE_EVS housekeeping once, allow a bounded settling delay, and confirm a newly received housekeeping packet. This does not change event-service configuration.",
-    "supportedTargets": ["CFS-1_QEMU"],
+    "supportedTargets": [
+      "CFS-1_QEMU"
+    ],
     "timeoutSec": 30,
     "steps": [
-      {"id": "request-hk", "type": "command", "packet": "CFE_EVS_SEND_HK_CMD", "parameters": {}, "timeoutSec": 3},
-      {"id": "settle", "type": "delay", "seconds": 0.5},
-      {"id": "confirm-hk", "type": "waitTelemetry", "packet": "CFE_EVS_HK", "item": "COMMAND_COUNTER", "operator": "gte", "value": 0, "timeoutSec": 10, "pollIntervalSec": 0.5}
+      {
+        "id": "request-hk",
+        "type": "command",
+        "packet": "CFE_EVS_SEND_HK_CMD",
+        "parameters": {},
+        "timeoutSec": 3
+      },
+      {
+        "id": "settle",
+        "type": "delay",
+        "seconds": 0.5
+      },
+      {
+        "id": "confirm-hk",
+        "type": "waitTelemetry",
+        "packet": "CFE_EVS_HK",
+        "item": "COMMAND_COUNTER",
+        "operator": "gte",
+        "value": 0,
+        "timeoutSec": 10,
+        "pollIntervalSec": 0.5
+      }
     ],
-    "telemetryItems": [{"packet": "CFE_EVS_HK", "item": "COMMAND_COUNTER"}],
-    "successCriteria": {"type": "allStepsSucceeded", "requireFreshTelemetry": true}
+    "telemetryItems": [
+      {
+        "packet": "CFE_EVS_HK",
+        "item": "COMMAND_COUNTER"
+      }
+    ],
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
   },
   {
     "schemaVersion": 1,
@@ -36,23 +90,65 @@
     "version": "1.0.0",
     "name": "QEMU TC log photo path traversal",
     "description": "Record commands in an onboard TC log, seal and read the file, then use a camera filename containing ../ to replace that closed log with a fixed image. Ground command history remains separate.",
-    "supportedTargets": ["CFS-1_QEMU"],
+    "supportedTargets": [
+      "CFS-1_QEMU"
+    ],
     "timeoutSec": 120,
     "steps": [
-      {"id":"seal-baseline","type":"tcLogPhase","phase":"seal-baseline"},
-      {"id":"record-normal","type":"tcLogPhase","phase":"record-normal"},
-      {"id":"seal-target","type":"tcLogPhase","phase":"seal-target"},
-      {"id":"read-before","type":"tcLogPhase","phase":"read-before"},
-      {"id":"overwrite-log","type":"tcLogPhase","phase":"overwrite-log"},
-      {"id":"read-after","type":"tcLogPhase","phase":"read-after"},
-      {"id":"confirm-continuity","type":"tcLogPhase","phase":"confirm-continuity"}
+      {
+        "id": "seal-baseline",
+        "type": "tcLogPhase",
+        "phase": "seal-baseline"
+      },
+      {
+        "id": "record-normal",
+        "type": "tcLogPhase",
+        "phase": "record-normal"
+      },
+      {
+        "id": "seal-target",
+        "type": "tcLogPhase",
+        "phase": "seal-target"
+      },
+      {
+        "id": "read-before",
+        "type": "tcLogPhase",
+        "phase": "read-before"
+      },
+      {
+        "id": "overwrite-log",
+        "type": "tcLogPhase",
+        "phase": "overwrite-log"
+      },
+      {
+        "id": "read-after",
+        "type": "tcLogPhase",
+        "phase": "read-after"
+      },
+      {
+        "id": "confirm-continuity",
+        "type": "tcLogPhase",
+        "phase": "confirm-continuity"
+      }
     ],
     "telemetryItems": [
-      {"packet":"CI_LOG_STATUS","item":"RESULT"},
-      {"packet":"CI_LOG_CHUNK","item":"RESULT"},
-      {"packet":"TC_CAMERA_RESULT","item":"STATUS"}
+      {
+        "packet": "CI_LOG_STATUS",
+        "item": "RESULT"
+      },
+      {
+        "packet": "CI_LOG_CHUNK",
+        "item": "RESULT"
+      },
+      {
+        "packet": "TC_CAMERA_RESULT",
+        "item": "STATUS"
+      }
     ],
-    "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
   },
   {
     "schemaVersion": 1,
@@ -60,23 +156,65 @@
     "version": "1.0.0",
     "name": "BBB TC log photo path traversal",
     "description": "Record commands in an onboard TC log, seal and read the file, then use a camera filename containing ../ to replace that closed log with a fixed image. Ground command history remains separate.",
-    "supportedTargets": ["CFS-1_BBB"],
+    "supportedTargets": [
+      "CFS-1_BBB"
+    ],
     "timeoutSec": 120,
     "steps": [
-      {"id":"seal-baseline","type":"tcLogPhase","phase":"seal-baseline"},
-      {"id":"record-normal","type":"tcLogPhase","phase":"record-normal"},
-      {"id":"seal-target","type":"tcLogPhase","phase":"seal-target"},
-      {"id":"read-before","type":"tcLogPhase","phase":"read-before"},
-      {"id":"overwrite-log","type":"tcLogPhase","phase":"overwrite-log"},
-      {"id":"read-after","type":"tcLogPhase","phase":"read-after"},
-      {"id":"confirm-continuity","type":"tcLogPhase","phase":"confirm-continuity"}
+      {
+        "id": "seal-baseline",
+        "type": "tcLogPhase",
+        "phase": "seal-baseline"
+      },
+      {
+        "id": "record-normal",
+        "type": "tcLogPhase",
+        "phase": "record-normal"
+      },
+      {
+        "id": "seal-target",
+        "type": "tcLogPhase",
+        "phase": "seal-target"
+      },
+      {
+        "id": "read-before",
+        "type": "tcLogPhase",
+        "phase": "read-before"
+      },
+      {
+        "id": "overwrite-log",
+        "type": "tcLogPhase",
+        "phase": "overwrite-log"
+      },
+      {
+        "id": "read-after",
+        "type": "tcLogPhase",
+        "phase": "read-after"
+      },
+      {
+        "id": "confirm-continuity",
+        "type": "tcLogPhase",
+        "phase": "confirm-continuity"
+      }
     ],
     "telemetryItems": [
-      {"packet":"CI_LOG_STATUS","item":"RESULT"},
-      {"packet":"CI_LOG_CHUNK","item":"RESULT"},
-      {"packet":"TC_CAMERA_RESULT","item":"STATUS"}
+      {
+        "packet": "CI_LOG_STATUS",
+        "item": "RESULT"
+      },
+      {
+        "packet": "CI_LOG_CHUNK",
+        "item": "RESULT"
+      },
+      {
+        "packet": "TC_CAMERA_RESULT",
+        "item": "STATUS"
+      }
     ],
-    "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
   },
   {
     "schemaVersion": 1,
@@ -84,30 +222,97 @@
     "version": "1.0.0",
     "name": "QEMU MM indirect payload write",
     "description": "MM finds the writable PAYLOAD_PULSE_APP module and pointer slot. A direct write to protected PAYLOAD_CTRL_APP is denied; changing one permitted pointer byte redirects a normal pulse to the controller mode byte. Observe its fault, acknowledged halt and APP_ERROR exit while the pulse app stays alive.",
-    "supportedTargets": ["CFS-1_QEMU"],
+    "supportedTargets": [
+      "CFS-1_QEMU"
+    ],
     "timeoutSec": 120,
     "steps": [
-      {"id":"baseline","type":"pspPhase","phase":"baseline"},
-      {"id":"map","type":"pspPhase","phase":"map"},
-      {"id":"deny-direct-write","type":"pspPhase","phase":"deny-direct-write"},
-      {"id":"pause","type":"pspPhase","phase":"pause"},
-      {"id":"read-pointer","type":"pspPhase","phase":"read-pointer"},
-      {"id":"write-pointer-byte","type":"pspPhase","phase":"write-pointer-byte"},
-      {"id":"verify-pointer","type":"pspPhase","phase":"verify-pointer"},
-      {"id":"resume","type":"pspPhase","phase":"resume"},
-      {"id":"observe-fault","type":"pspPhase","phase":"observe-fault"},
-      {"id":"confirm-es-exit","type":"pspPhase","phase":"confirm-es-exit"},
-      {"id":"confirm-pulse","type":"pspPhase","phase":"confirm-pulse"}
+      {
+        "id": "baseline",
+        "type": "pspPhase",
+        "phase": "baseline"
+      },
+      {
+        "id": "map",
+        "type": "pspPhase",
+        "phase": "map"
+      },
+      {
+        "id": "deny-direct-write",
+        "type": "pspPhase",
+        "phase": "deny-direct-write"
+      },
+      {
+        "id": "pause",
+        "type": "pspPhase",
+        "phase": "pause"
+      },
+      {
+        "id": "read-pointer",
+        "type": "pspPhase",
+        "phase": "read-pointer"
+      },
+      {
+        "id": "write-pointer-byte",
+        "type": "pspPhase",
+        "phase": "write-pointer-byte"
+      },
+      {
+        "id": "verify-pointer",
+        "type": "pspPhase",
+        "phase": "verify-pointer"
+      },
+      {
+        "id": "resume",
+        "type": "pspPhase",
+        "phase": "resume"
+      },
+      {
+        "id": "observe-fault",
+        "type": "pspPhase",
+        "phase": "observe-fault"
+      },
+      {
+        "id": "confirm-es-exit",
+        "type": "pspPhase",
+        "phase": "confirm-es-exit"
+      },
+      {
+        "id": "confirm-pulse",
+        "type": "pspPhase",
+        "phase": "confirm-pulse"
+      }
     ],
     "telemetryItems": [
-      {"packet":"MM_DEBUG","item":"STATUS"},
-      {"packet":"MM_DEBUG","item":"POINTER_SLOT"},
-      {"packet":"PAYLOAD_PULSE_STATE","item":"STATE"},
-      {"packet":"PAYLOAD_PULSE_STATE","item":"FEED_TARGET_ADDRESS"},
-      {"packet":"PAYLOAD_CTRL_STATE","item":"FAULT"},
-      {"packet":"PAYLOAD_CTRL_STATE","item":"HALT_ACKED"}
+      {
+        "packet": "MM_DEBUG",
+        "item": "STATUS"
+      },
+      {
+        "packet": "MM_DEBUG",
+        "item": "POINTER_SLOT"
+      },
+      {
+        "packet": "PAYLOAD_PULSE_STATE",
+        "item": "STATE"
+      },
+      {
+        "packet": "PAYLOAD_PULSE_STATE",
+        "item": "FEED_TARGET_ADDRESS"
+      },
+      {
+        "packet": "PAYLOAD_CTRL_STATE",
+        "item": "FAULT"
+      },
+      {
+        "packet": "PAYLOAD_CTRL_STATE",
+        "item": "HALT_ACKED"
+      }
     ],
-    "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
   },
   {
     "schemaVersion": 1,
@@ -115,29 +320,526 @@
     "version": "1.0.0",
     "name": "BBB MM indirect payload write",
     "description": "MM finds the writable PAYLOAD_PULSE_APP module and pointer slot. A direct write to protected PAYLOAD_CTRL_APP is denied; changing one permitted pointer byte redirects a normal pulse to the controller mode byte. Observe its fault, acknowledged halt and APP_ERROR exit while the pulse app stays alive.",
-    "supportedTargets": ["CFS-1_BBB"],
+    "supportedTargets": [
+      "CFS-1_BBB"
+    ],
     "timeoutSec": 120,
     "steps": [
-      {"id":"baseline","type":"pspPhase","phase":"baseline"},
-      {"id":"map","type":"pspPhase","phase":"map"},
-      {"id":"deny-direct-write","type":"pspPhase","phase":"deny-direct-write"},
-      {"id":"pause","type":"pspPhase","phase":"pause"},
-      {"id":"read-pointer","type":"pspPhase","phase":"read-pointer"},
-      {"id":"write-pointer-byte","type":"pspPhase","phase":"write-pointer-byte"},
-      {"id":"verify-pointer","type":"pspPhase","phase":"verify-pointer"},
-      {"id":"resume","type":"pspPhase","phase":"resume"},
-      {"id":"observe-fault","type":"pspPhase","phase":"observe-fault"},
-      {"id":"confirm-es-exit","type":"pspPhase","phase":"confirm-es-exit"},
-      {"id":"confirm-pulse","type":"pspPhase","phase":"confirm-pulse"}
+      {
+        "id": "baseline",
+        "type": "pspPhase",
+        "phase": "baseline"
+      },
+      {
+        "id": "map",
+        "type": "pspPhase",
+        "phase": "map"
+      },
+      {
+        "id": "deny-direct-write",
+        "type": "pspPhase",
+        "phase": "deny-direct-write"
+      },
+      {
+        "id": "pause",
+        "type": "pspPhase",
+        "phase": "pause"
+      },
+      {
+        "id": "read-pointer",
+        "type": "pspPhase",
+        "phase": "read-pointer"
+      },
+      {
+        "id": "write-pointer-byte",
+        "type": "pspPhase",
+        "phase": "write-pointer-byte"
+      },
+      {
+        "id": "verify-pointer",
+        "type": "pspPhase",
+        "phase": "verify-pointer"
+      },
+      {
+        "id": "resume",
+        "type": "pspPhase",
+        "phase": "resume"
+      },
+      {
+        "id": "observe-fault",
+        "type": "pspPhase",
+        "phase": "observe-fault"
+      },
+      {
+        "id": "confirm-es-exit",
+        "type": "pspPhase",
+        "phase": "confirm-es-exit"
+      },
+      {
+        "id": "confirm-pulse",
+        "type": "pspPhase",
+        "phase": "confirm-pulse"
+      }
     ],
     "telemetryItems": [
-      {"packet":"MM_DEBUG","item":"STATUS"},
-      {"packet":"MM_DEBUG","item":"POINTER_SLOT"},
-      {"packet":"PAYLOAD_PULSE_STATE","item":"STATE"},
-      {"packet":"PAYLOAD_PULSE_STATE","item":"FEED_TARGET_ADDRESS"},
-      {"packet":"PAYLOAD_CTRL_STATE","item":"FAULT"},
-      {"packet":"PAYLOAD_CTRL_STATE","item":"HALT_ACKED"}
+      {
+        "packet": "MM_DEBUG",
+        "item": "STATUS"
+      },
+      {
+        "packet": "MM_DEBUG",
+        "item": "POINTER_SLOT"
+      },
+      {
+        "packet": "PAYLOAD_PULSE_STATE",
+        "item": "STATE"
+      },
+      {
+        "packet": "PAYLOAD_PULSE_STATE",
+        "item": "FEED_TARGET_ADDRESS"
+      },
+      {
+        "packet": "PAYLOAD_CTRL_STATE",
+        "item": "FAULT"
+      },
+      {
+        "packet": "PAYLOAD_CTRL_STATE",
+        "item": "HALT_ACKED"
+      }
     ],
-    "successCriteria":{"type":"allStepsSucceeded","requireFreshTelemetry":true}
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "id": "qemu-cs-crc-key-oracle",
+    "version": "1.0.0",
+    "name": "CS one-byte CRC key recovery",
+    "description": "Recover the X-band lab key with 16 one-byte CS CRC requests, then authenticate and decrypt a new encrypted X-band UDP telemetry frame.",
+    "supportedTargets": [
+      "CFS-1_QEMU"
+    ],
+    "timeoutSec": 120,
+    "steps": [
+      {
+        "id": "locate-key",
+        "type": "resolveAddress",
+        "timeoutSec": 10,
+        "pollIntervalSec": 0.5
+      },
+      {
+        "id": "recover-byte-00",
+        "type": "crcByte",
+        "offset": 0,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-01",
+        "type": "crcByte",
+        "offset": 1,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-02",
+        "type": "crcByte",
+        "offset": 2,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-03",
+        "type": "crcByte",
+        "offset": 3,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-04",
+        "type": "crcByte",
+        "offset": 4,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-05",
+        "type": "crcByte",
+        "offset": 5,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-06",
+        "type": "crcByte",
+        "offset": 6,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-07",
+        "type": "crcByte",
+        "offset": 7,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-08",
+        "type": "crcByte",
+        "offset": 8,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-09",
+        "type": "crcByte",
+        "offset": 9,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-10",
+        "type": "crcByte",
+        "offset": 10,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-11",
+        "type": "crcByte",
+        "offset": 11,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-12",
+        "type": "crcByte",
+        "offset": 12,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-13",
+        "type": "crcByte",
+        "offset": 13,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-14",
+        "type": "crcByte",
+        "offset": 14,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-15",
+        "type": "crcByte",
+        "offset": 15,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "verify-xband-frame",
+        "type": "verifyXbandFrame",
+        "timeoutSec": 8,
+        "pollIntervalSec": 0.25
+      }
+    ],
+    "telemetryItems": [
+      {
+        "packet": "XKEY_HK",
+        "item": "KEY_ADDRESS"
+      },
+      {
+        "packet": "XKEY_HK",
+        "item": "KEY_LENGTH"
+      },
+      {
+        "packet": "XKEY_HK",
+        "item": "CHANNEL_READY"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "LAST_ONE_SHOT_ADDRESS"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "LAST_ONE_SHOT_CHECKSUM"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "COMMAND_COUNTER"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "COMMAND_ERROR_COUNTER"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "MAGIC"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "IV_PREFIX"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "COUNTER"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_0"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_1"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_2"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_3"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_0"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_1"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_2"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_3"
+      }
+    ],
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "id": "bbb-cs-crc-key-oracle",
+    "version": "1.0.0",
+    "name": "BBB CS one-byte CRC key recovery",
+    "description": "Recover the BBB X-band lab key with 16 one-byte CS CRC requests, then authenticate and decrypt a new encrypted X-band UDP telemetry frame.",
+    "supportedTargets": [
+      "CFS-1_BBB"
+    ],
+    "timeoutSec": 120,
+    "steps": [
+      {
+        "id": "locate-key",
+        "type": "resolveAddress",
+        "timeoutSec": 10,
+        "pollIntervalSec": 0.5
+      },
+      {
+        "id": "recover-byte-00",
+        "type": "crcByte",
+        "offset": 0,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-01",
+        "type": "crcByte",
+        "offset": 1,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-02",
+        "type": "crcByte",
+        "offset": 2,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-03",
+        "type": "crcByte",
+        "offset": 3,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-04",
+        "type": "crcByte",
+        "offset": 4,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-05",
+        "type": "crcByte",
+        "offset": 5,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-06",
+        "type": "crcByte",
+        "offset": 6,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-07",
+        "type": "crcByte",
+        "offset": 7,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-08",
+        "type": "crcByte",
+        "offset": 8,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-09",
+        "type": "crcByte",
+        "offset": 9,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-10",
+        "type": "crcByte",
+        "offset": 10,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-11",
+        "type": "crcByte",
+        "offset": 11,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-12",
+        "type": "crcByte",
+        "offset": 12,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-13",
+        "type": "crcByte",
+        "offset": 13,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-14",
+        "type": "crcByte",
+        "offset": 14,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "recover-byte-15",
+        "type": "crcByte",
+        "offset": 15,
+        "timeoutSec": 6,
+        "pollIntervalSec": 0.25
+      },
+      {
+        "id": "verify-xband-frame",
+        "type": "verifyXbandFrame",
+        "timeoutSec": 8,
+        "pollIntervalSec": 0.25
+      }
+    ],
+    "telemetryItems": [
+      {
+        "packet": "XKEY_HK",
+        "item": "KEY_ADDRESS"
+      },
+      {
+        "packet": "XKEY_HK",
+        "item": "KEY_LENGTH"
+      },
+      {
+        "packet": "XKEY_HK",
+        "item": "CHANNEL_READY"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "LAST_ONE_SHOT_ADDRESS"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "LAST_ONE_SHOT_CHECKSUM"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "COMMAND_COUNTER"
+      },
+      {
+        "packet": "CS_HK",
+        "item": "COMMAND_ERROR_COUNTER"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "MAGIC"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "IV_PREFIX"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "COUNTER"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_0"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_1"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_2"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "CIPHERTEXT_3"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_0"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_1"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_2"
+      },
+      {
+        "packet": "XBAND_FRAME",
+        "item": "TAG_3"
+      }
+    ],
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
+    }
   }
 ]

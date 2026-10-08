@@ -26,6 +26,8 @@ COMMANDS = {name: (data["telemetryPacket"], data["streamId"]) for name, data in 
 ITEMS = frozenset(POLICY["telemetryItems"])
 TELEMETRY_TYPES = POLICY.get("telemetryTypes", {})
 ORACLE = POLICY["crcKeyOracle"]
+XBAND_FIELDS = ("MAGIC", "IV_PREFIX", "COUNTER", "CIPHERTEXT_0", "CIPHERTEXT_1",
+                "CIPHERTEXT_2", "CIPHERTEXT_3", "TAG_0", "TAG_1", "TAG_2", "TAG_3")
 TCLOG = POLICY["tcLogTraversal"]
 PSP = POLICY["pspIndirectWrite"]
 RECEIPT_ITEMS = ("RECEIVED_COUNT", "RECEIVED_TIMESECONDS")
@@ -92,7 +94,8 @@ def _number(value, low, high):
 
 def _reference(value):
     _keys(value, "packet item")
-    require(value["packet"] in {v[0] for v in COMMANDS.values()} and value["item"] in ITEMS)
+    require(value["packet"] in {v[0] for v in COMMANDS.values()} | set(POLICY["passiveTelemetryPackets"]) and
+            value["item"] in ITEMS)
     return value["packet"], value["item"]
 
 
@@ -106,29 +109,34 @@ def validate_definition(definition):
         require(type(definition[field]) is str and 1 <= len(definition[field]) <= maximum)
     require(type(definition["supportedTargets"]) is list and len(definition["supportedTargets"]) == 1 and definition["supportedTargets"][0] in ALLOWED_TARGETS)
     if definition["supportedTargets"][0] == "CFS-1_BBB":
-        require(definition["id"] in (TCLOG["scenarioIds"]["CFS-1_BBB"], PSP["scenarioIds"]["CFS-1_BBB"]))
+        require(definition["id"] in (TCLOG["scenarioIds"]["CFS-1_BBB"], PSP["scenarioIds"]["CFS-1_BBB"],
+                                     "bbb-cs-crc-key-oracle"))
     _number(definition["timeoutSec"], 1, 120)
     _keys(definition["successCriteria"], "type requireFreshTelemetry")
     require(definition["successCriteria"]["type"] == "allStepsSucceeded" and definition["successCriteria"]["requireFreshTelemetry"] is True)
     refs = definition["telemetryItems"]
-    require(type(refs) is list and 1 <= len(refs) <= 16)
+    require(type(refs) is list and 1 <= len(refs) <= 20)
     refs = [_reference(value) for value in refs]
     require(len(set(refs)) == len(refs))
     steps = definition["steps"]
-    require(type(steps) is list and 2 <= len(steps) <= 17)
-    if any(type(step) is dict and step.get("type") in ("resolveAddress", "crcByte") for step in steps):
-        require(definition["id"] == "qemu-cs-crc-key-oracle" and definition["timeoutSec"] == 120)
-        require(len(steps) == ORACLE["keyBytes"] + 1)
+    require(type(steps) is list and 2 <= len(steps) <= 18)
+    if any(type(step) is dict and step.get("type") in ("resolveAddress", "crcByte", "verifyXbandFrame") for step in steps):
+        target = ORACLE["scenarioTargets"].get(definition["id"])
+        require(target is not None and definition["supportedTargets"] == [target] and definition["timeoutSec"] == 120)
+        require(len(steps) == ORACLE["keyBytes"] + 2)
         expected_refs = {
             (ORACLE["keyPacket"], ORACLE[name]) for name in ("keyAddressItem", "keyLengthItem", "channelReadyItem")
         } | {
-            (ORACLE["checksumPacket"], ORACLE[name]) for name in ("checksumAddressItem", "checksumValueItem")
-        }
+            (ORACLE["checksumPacket"], ORACLE[name]) for name in
+            ("checksumAddressItem", "checksumValueItem", "checksumCommandCounterItem", "checksumErrorCounterItem")
+        } | {(ORACLE["xbandPacket"], item) for item in XBAND_FIELDS}
         require(set(refs) == expected_refs)
         require(steps[0] == {"id": "locate-key", "type": "resolveAddress", "timeoutSec": 10, "pollIntervalSec": 0.5})
-        for offset, step in enumerate(steps[1:]):
+        for offset, step in enumerate(steps[1:-1]):
             require(step == {"id": f"recover-byte-{offset:02d}", "type": "crcByte", "offset": offset,
                              "timeoutSec": 6, "pollIntervalSec": 0.25})
+        require(steps[-1] == {"id": "verify-xband-frame", "type": "verifyXbandFrame",
+                              "timeoutSec": 8, "pollIntervalSec": 0.25})
         canonical_hash(definition)
         return definition
     if any(type(step) is dict and step.get("type") == "tcLogPhase" for step in steps):
@@ -250,6 +258,41 @@ def cfe_crc16(data):
 
 CRC_BYTE_LOOKUP = {cfe_crc16(bytes((byte,))): byte for byte in range(256)}
 require(len(CRC_BYTE_LOOKUP) == 256, "crc_oracle_not_injective")
+
+
+def decode_xband_frame(key, values):
+    """Authenticate one 48-byte XBD1 frame and decode its synthetic telemetry."""
+    require(type(key) in (bytes, bytearray) and len(key) == ORACLE["keyBytes"], "invalid_oracle_state")
+    require(type(values) is dict and set(values) == set(XBAND_FIELDS), "xband_frame_invalid")
+    for field in XBAND_FIELDS:
+        width = TELEMETRY_TYPES[f"{ORACLE['xbandPacket']}.{field}"]
+        require(type(values[field]) is int and 0 <= values[field] < (1 << width), "xband_frame_invalid")
+    require(values["MAGIC"] == ORACLE["xbandMagic"], "xband_frame_invalid")
+    header = (values["MAGIC"].to_bytes(4, "big") + values["IV_PREFIX"].to_bytes(4, "big") +
+              values["COUNTER"].to_bytes(8, "big"))
+    ciphertext = b"".join(values[f"CIPHERTEXT_{i}"].to_bytes(4, "big") for i in range(4))
+    tag = b"".join(values[f"TAG_{i}"].to_bytes(4, "big") for i in range(4))
+    try:
+        from cryptography.exceptions import InvalidTag
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise ScenarioError("xband_crypto_unavailable") from None
+    try:
+        plaintext = AESGCM(bytes(key)).decrypt(header[4:], ciphertext + tag, header)
+    except InvalidTag:
+        raise ScenarioError("xband_auth_failed") from None
+    require(len(plaintext) == 16, "xband_payload_invalid")
+    sequence = int.from_bytes(plaintext[0:4], "big")
+    seconds = int.from_bytes(plaintext[4:8], "big")
+    temperature = int.from_bytes(plaintext[8:10], "big")
+    voltage = int.from_bytes(plaintext[10:12], "big")
+    status = int.from_bytes(plaintext[12:16], "big")
+    require(sequence == (values["COUNTER"] & 0xffffffff) and
+            temperature == 2150 + values["COUNTER"] % 11 and
+            voltage == 7400 + values["COUNTER"] % 17 and status == 3,
+            "xband_payload_invalid")
+    return {"sequence": sequence, "cfe_seconds": seconds, "temperature_centi_c": temperature,
+            "bus_voltage_mv": voltage, "status_flags": status}
 
 
 class OpenC3Adapter:
@@ -399,6 +442,9 @@ class ScenarioRunner:
     def _preflight(self, definition):
         names = self._call(self.adapter.targets, "targets")
         require(type(names) is list and self.target in set(names).intersection(definition["supportedTargets"]).intersection(ALLOWED_TARGETS), "target_not_installed")
+        self.xband_target = ORACLE["xbandTargets"].get(self.target)
+        if any(step["type"] == "verifyXbandFrame" for step in definition["steps"]):
+            require(self.xband_target in names, "xband_target_not_installed")
         if any(step["type"] == "tcLogPhase" for step in definition["steps"]):
             self._preflight_tc_log()
             return
@@ -415,8 +461,9 @@ class ScenarioRunner:
             require(all(items[k].get("default") == v for k, v in expected.items()), "command_definition_mismatch")
             require(items["CCSDS_STREAMID"].get("id_value") == expected["CCSDS_STREAMID"], "command_definition_mismatch")
         for packet in dict.fromkeys(ref["packet"] for ref in definition["telemetryItems"]):
-            data = self._call(lambda: self.adapter.telemetry_definition(self.target, packet), "telemetry_definition")
-            require(type(data) is dict and data.get("target_name") == self.target and data.get("packet_name") == packet, "invalid_telemetry_item")
+            telemetry_target = self.xband_target if packet == ORACLE["xbandPacket"] else self.target
+            data = self._call(lambda: self.adapter.telemetry_definition(telemetry_target, packet), "telemetry_definition")
+            require(type(data) is dict and data.get("target_name") == telemetry_target and data.get("packet_name") == packet, "invalid_telemetry_item")
             items = {v["name"]: v for v in data.get("items", [])}
             required = {r["item"] for r in definition["telemetryItems"] if r["packet"] == packet}
             require(required.union(RECEIPT_ITEMS) <= set(items), "invalid_telemetry_item")
@@ -426,6 +473,7 @@ class ScenarioRunner:
             require(all(items[k].get("data_type") == "DERIVED" for k in RECEIPT_ITEMS), "telemetry_definition_mismatch")
         if any(step["type"] == "crcByte" for step in definition["steps"]):
             self._preflight_oracle()
+            self._preflight_xband()
 
     def _preflight_tc_log(self):
         fields = {
@@ -539,7 +587,7 @@ class ScenarioRunner:
                 data.get("packet_name") == packet and
                 not any(data.get(flag) for flag in ("hazardous", "disabled", "hidden")), "invalid_command")
         items = {item["name"]: item for item in data.get("items", [])}
-        expected = dict(HEADER_DEFAULTS, CCSDS_STREAMID=ORACLE["streamId"])
+        expected = dict(HEADER_DEFAULTS, CCSDS_STREAMID=ORACLE["streamId"], CCSDS_FC=ORACLE["functionCode"])
         fields = {"ADDRESS", "SIZE", "MAX_BYTES_PER_CYCLE"}
         require(set(items) == set(expected) | fields | RESERVED_ITEMS, "command_definition_mismatch")
         require(all(items[name].get("default") == value for name, value in expected.items()) and
@@ -551,10 +599,23 @@ class ScenarioRunner:
         require(type(data) is dict and data.get("target_name") == self.target and data.get("packet_name") == packet,
                 "invalid_telemetry_item")
         items = {item["name"]: item for item in data.get("items", [])}
-        for name in ("checksumSizeItem", "checksumBusyItem"):
+        for name in ("checksumSizeItem", "checksumBusyItem", "checksumCommandCounterItem", "checksumErrorCounterItem"):
             item = ORACLE[name]
             require(item in items and items[item].get("data_type") == "UINT" and
                     items[item].get("bit_size") == TELEMETRY_TYPES[f"{packet}.{item}"], "telemetry_definition_mismatch")
+
+    def _preflight_xband(self):
+        packet = ORACLE["xbandPacket"]
+        data = self._call(lambda: self.adapter.telemetry_definition(self.xband_target, packet), "telemetry_definition")
+        require(type(data) is dict and data.get("target_name") == self.xband_target and
+                data.get("packet_name") == packet, "invalid_telemetry_item")
+        items = {item["name"]: item for item in data.get("items", [])}
+        require(set(items) - RESERVED_ITEMS == set(XBAND_FIELDS), "telemetry_definition_mismatch")
+        require(items["MAGIC"].get("id_value") == ORACLE["xbandMagic"],
+                "telemetry_definition_mismatch")
+        require(all(items[field].get("data_type") == "UINT" and
+                    items[field].get("bit_size") == TELEMETRY_TYPES[f"{packet}.{field}"]
+                    for field in XBAND_FIELDS), "telemetry_definition_mismatch")
 
     def _delay(self, seconds):
         end = self.monotonic() + seconds
@@ -623,8 +684,13 @@ class ScenarioRunner:
         address = self.key_address + step["offset"]
         packet = ORACLE["checksumPacket"]
         fields = (ORACLE["checksumAddressItem"], ORACLE["checksumSizeItem"],
-                  ORACLE["checksumValueItem"], ORACLE["checksumBusyItem"])
+                  ORACLE["checksumValueItem"], ORACLE["checksumBusyItem"],
+                  ORACLE["checksumCommandCounterItem"], ORACLE["checksumErrorCounterItem"])
         baseline = self._call(lambda: self.adapter.sample_fields(self.target, packet, fields), "baseline")
+        old_commands = baseline.values[ORACLE["checksumCommandCounterItem"]]
+        old_errors = baseline.values[ORACLE["checksumErrorCounterItem"]]
+        require(type(old_commands) is int and 0 <= old_commands <= 255 and
+                type(old_errors) is int and 0 <= old_errors <= 255, "invalid_oracle_counters")
         if self.last_send is not None:
             self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
         self._check_stop()
@@ -642,8 +708,13 @@ class ScenarioRunner:
             self._check_stop()
             sample = self._call(lambda: self.adapter.sample_fields(self.target, packet, fields),
                                 "telemetry", min(2, max(0.001, end - self.monotonic())))
-            reported_address, size, checksum, busy = (sample.values[field] for field in fields)
-            if (not sample.stale and sample.count > baseline.count and sample.received > baseline.received and
+            reported_address, size, checksum, busy, commands, errors = (sample.values[field] for field in fields)
+            fresh = not sample.stale and sample.count > baseline.count and sample.received > baseline.received
+            require(type(commands) is int and 0 <= commands <= 255 and
+                    type(errors) is int and 0 <= errors <= 255, "invalid_oracle_counters")
+            if fresh and (errors - old_errors) % 256 != 0:
+                raise ScenarioError("crc_command_rejected")
+            if (fresh and (commands - old_commands) % 256 == 1 and errors == old_errors and
                     reported_address == address and size == 1 and busy == 0 and type(checksum) is int):
                 crc = checksum & 0xffff  # cFE can sign-extend its int16 CRC to a uint32 TM field.
                 require(crc in CRC_BYTE_LOOKUP, "crc_not_invertible")
@@ -652,9 +723,37 @@ class ScenarioRunner:
                 return {"packet": packet, "item": ORACLE["checksumValueItem"], "value": crc,
                         "received_at": datetime.fromtimestamp(sample.received, timezone.utc).isoformat(),
                         "commandAccepted": True, "telemetryConfirmed": True,
-                        "message": f"0x{address:08x}: CRC 0x{crc:04x} -> byte 0x{value:02x}"}
+                        "message": f"0x{address:08x}: CRC 0x{crc:04x}, byte {step['offset'] + 1}/16 recovered"}
             self.sleep(min(step["pollIntervalSec"], end - self.monotonic(), self._remaining()))
         raise ScenarioError("crc_telemetry_timeout")
+
+    def _verify_xband_frame(self, step):
+        require(hasattr(self, "recovered") and len(self.recovered) == ORACLE["keyBytes"],
+                "incomplete_key")
+        packet = ORACLE["xbandPacket"]
+        baseline = self._call(lambda: self.adapter.sample_fields(self.xband_target, packet, XBAND_FIELDS),
+                              "baseline")
+        end = min(self.deadline, self.monotonic() + step["timeoutSec"])
+        for _ in range(math.ceil(step["timeoutSec"] / step["pollIntervalSec"]) + 1):
+            if self.monotonic() >= end:
+                break
+            self._check_stop()
+            sample = self._call(lambda: self.adapter.sample_fields(self.xband_target, packet, XBAND_FIELDS),
+                                "telemetry", min(2, max(0.001, end - self.monotonic())))
+            fresh = not sample.stale and sample.count > baseline.count and sample.received > baseline.received
+            if fresh:
+                decoded = decode_xband_frame(self.recovered, sample.values)
+                self.xband_verified = True
+                return {"packet": packet, "item": "COUNTER", "value": sample.values["COUNTER"],
+                        "received_at": datetime.fromtimestamp(sample.received, timezone.utc).isoformat(),
+                        "telemetryConfirmed": True, "authenticated": True,
+                        "message": (f"XBD1 frame {decoded['sequence']} authenticated and decrypted: "
+                                    f"temperature {decoded['temperature_centi_c'] / 100:.2f} C, "
+                                    f"bus {decoded['bus_voltage_mv']} mV, status 0x{decoded['status_flags']:08x}")}
+            remaining = end - self.monotonic()
+            if remaining > 0:
+                self.sleep(min(step["pollIntervalSec"], remaining, self._remaining()))
+        raise ScenarioError("xband_telemetry_timeout")
 
     def _tc_next_request_id(self):
         if not hasattr(self, "tc_request_id"):
@@ -1054,6 +1153,8 @@ class ScenarioRunner:
                     data = self._resolve_address(step)
                 elif step["type"] == "crcByte":
                     data = self._crc_byte(step)
+                elif step["type"] == "verifyXbandFrame":
+                    data = self._verify_xband_frame(step)
                 elif step["type"] == "tcLogPhase":
                     data = self._tc_log_phase(step)
                 elif step["type"] == "pspPhase":
@@ -1062,8 +1163,9 @@ class ScenarioRunner:
                     data = self._wait_telemetry(step)
                 self._emit("step", dict(data, step_id=step["id"], status="succeeded"))
             if hasattr(self, "recovered"):
-                require(len(self.recovered) == ORACLE["keyBytes"], "incomplete_key")
-                message = "Recovered X-band lab key: " + self.recovered.hex()
+                require(len(self.recovered) == ORACLE["keyBytes"] and
+                        getattr(self, "xband_verified", False), "incomplete_key")
+                message = "Recovered 16-byte X-band lab key and decrypted an authenticated XBD1 telemetry frame"
             elif hasattr(self, "tc_target_index"):
                 message = f"Onboard TC log tc{self.tc_target_index:04d}.log replaced by the demo photo"
             elif hasattr(self, "psp_pointer_before"):

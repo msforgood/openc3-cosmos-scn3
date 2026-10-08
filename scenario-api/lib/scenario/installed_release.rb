@@ -6,7 +6,7 @@ module Scenario
   # These pins are code-owned; a runtime environment override cannot bless a
   # mismatched init/API pair. Build and publish both images as one release.
   class InstalledRelease
-    RELEASE = '1.0.11'.freeze
+    RELEASE = '1.0.12'.freeze
     CORE_VERSION = '6.10.1'.freeze
     NAMES = %w[openc3-cosmos-cfs-scenario-runner openc3-cosmos-tool-scenariorunner].freeze
     FILES = {

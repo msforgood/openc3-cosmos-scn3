@@ -71,6 +71,38 @@ class ServiceTest < ScenarioTest
     assert_empty @backend.launches
   end
 
+  def test_bbb_crc_oracle_authorizes_one_shot_only_on_its_target
+    definition = @catalog.get('bbb-cs-crc-key-oracle')
+    request = { 'scope' => 'DEFAULT', 'target' => 'CFS-1_BBB', 'scenario_id' => definition['id'],
+                'definition_version' => definition['version'], 'definition_hash' => Scenario::Canonical.hash(definition),
+                'request_id' => 'request-bbb-crc-0001' }
+    run, code = @service.create(request, token: TOKEN)
+    assert_equal 201, code
+    assert_equal 'running', run['state']
+    assert_equal 'CFS-1_BBB', @backend.launches.last['target']
+    assert @auth.calls.any? { |call| call[:permission] == 'cmd' && call[:target] == 'CFS-1_BBB' && call[:packet] == 'CS_CMD_ONE_SHOT' }
+    assert_error('unsupported_target') do
+      @service.create(request.merge('target' => 'CFS-1_QEMU', 'request_id' => 'request-bbb-crc-0002'), token: TOKEN)
+    end
+  end
+
+  def test_xband_authentication_callback_is_bound_to_verification_step
+    definition = @catalog.get('qemu-cs-crc-key-oracle')
+    request = input.merge('scenario_id' => definition['id'],
+                          'definition_version' => definition['version'],
+                          'definition_hash' => Scenario::Canonical.hash(definition))
+    run = @service.create(request, token: TOKEN).first
+    data = { 'step_id' => 'verify-xband-frame', 'status' => 'succeeded',
+             'packet' => 'XBAND_FRAME', 'telemetryConfirmed' => true,
+             'authenticated' => true, 'message' => 'XBD1 frame authenticated and decrypted' }
+    callback(run, 'step', data)
+    events = @service.events(run['id'], scope: 'DEFAULT', token: TOKEN)
+    assert events['items'].any? { |event| event.dig('data', 'authenticated') == true }
+    assert_error('invalid_event_data') { callback(run, 'step', data.merge('authenticated' => false)) }
+    assert_error('invalid_event_data') { callback(run, 'step', data.merge('step_id' => 'recover-byte-15')) }
+    assert_error('invalid_event_data') { callback(run, 'log', data) }
+  end
+
   def test_installed_validation_failure_prevents_launch
     @backend.validation_error = Scenario::Error.new('installed_definition_mismatch', nil, 409)
     assert_error('installed_definition_mismatch') { create }
