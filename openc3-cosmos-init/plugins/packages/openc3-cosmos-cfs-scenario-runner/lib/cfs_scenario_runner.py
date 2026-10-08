@@ -26,6 +26,10 @@ COMMANDS = {name: (data["telemetryPacket"], data["streamId"]) for name, data in 
 ITEMS = frozenset(POLICY["telemetryItems"])
 TELEMETRY_TYPES = POLICY.get("telemetryTypes", {})
 ORACLE = POLICY["crcKeyOracle"]
+XBAND_FIELDS = ("MAGIC", "IV_PREFIX", "COUNTER", "CIPHERTEXT_0", "CIPHERTEXT_1",
+                "CIPHERTEXT_2", "CIPHERTEXT_3", "TAG_0", "TAG_1", "TAG_2", "TAG_3")
+TCLOG = POLICY["tcLogTraversal"]
+PSP = POLICY["pspIndirectWrite"]
 RECEIPT_ITEMS = ("RECEIVED_COUNT", "RECEIVED_TIMESECONDS")
 RESERVED_ITEMS = frozenset({"PACKET_TIMESECONDS", "PACKET_TIMEFORMATTED", "RECEIVED_TIMESECONDS", "RECEIVED_TIMEFORMATTED", "RECEIVED_COUNT"})
 HEADER_DEFAULTS = POLICY["headerDefaults"]
@@ -90,7 +94,8 @@ def _number(value, low, high):
 
 def _reference(value):
     _keys(value, "packet item")
-    require(value["packet"] in {v[0] for v in COMMANDS.values()} and value["item"] in ITEMS)
+    require(value["packet"] in {v[0] for v in COMMANDS.values()} | set(POLICY["passiveTelemetryPackets"]) and
+            value["item"] in ITEMS)
     return value["packet"], value["item"]
 
 
@@ -103,28 +108,56 @@ def validate_definition(definition):
     for field, maximum in (("name", 120), ("description", 1000)):
         require(type(definition[field]) is str and 1 <= len(definition[field]) <= maximum)
     require(type(definition["supportedTargets"]) is list and len(definition["supportedTargets"]) == 1 and definition["supportedTargets"][0] in ALLOWED_TARGETS)
+    if definition["supportedTargets"][0] == "CFS-1_BBB":
+        require(definition["id"] in (TCLOG["scenarioIds"]["CFS-1_BBB"], PSP["scenarioIds"]["CFS-1_BBB"],
+                                     "bbb-cs-crc-key-oracle"))
     _number(definition["timeoutSec"], 1, 120)
     _keys(definition["successCriteria"], "type requireFreshTelemetry")
     require(definition["successCriteria"]["type"] == "allStepsSucceeded" and definition["successCriteria"]["requireFreshTelemetry"] is True)
     refs = definition["telemetryItems"]
-    require(type(refs) is list and 1 <= len(refs) <= 16)
+    require(type(refs) is list and 1 <= len(refs) <= 20)
     refs = [_reference(value) for value in refs]
     require(len(set(refs)) == len(refs))
     steps = definition["steps"]
-    require(type(steps) is list and 2 <= len(steps) <= 17)
-    if any(type(step) is dict and step.get("type") in ("resolveAddress", "crcByte") for step in steps):
-        require(definition["id"] == "qemu-cs-crc-key-oracle" and definition["timeoutSec"] == 120)
-        require(len(steps) == ORACLE["keyBytes"] + 1)
+    require(type(steps) is list and 2 <= len(steps) <= 18)
+    if any(type(step) is dict and step.get("type") in ("resolveAddress", "crcByte", "verifyXbandFrame") for step in steps):
+        target = ORACLE["scenarioTargets"].get(definition["id"])
+        require(target is not None and definition["supportedTargets"] == [target] and definition["timeoutSec"] == 120)
+        require(len(steps) == ORACLE["keyBytes"] + 2)
         expected_refs = {
             (ORACLE["keyPacket"], ORACLE[name]) for name in ("keyAddressItem", "keyLengthItem", "channelReadyItem")
         } | {
-            (ORACLE["checksumPacket"], ORACLE[name]) for name in ("checksumAddressItem", "checksumValueItem")
-        }
+            (ORACLE["checksumPacket"], ORACLE[name]) for name in
+            ("checksumAddressItem", "checksumValueItem", "checksumCommandCounterItem", "checksumErrorCounterItem")
+        } | {(ORACLE["xbandPacket"], item) for item in XBAND_FIELDS}
         require(set(refs) == expected_refs)
         require(steps[0] == {"id": "locate-key", "type": "resolveAddress", "timeoutSec": 10, "pollIntervalSec": 0.5})
-        for offset, step in enumerate(steps[1:]):
+        for offset, step in enumerate(steps[1:-1]):
             require(step == {"id": f"recover-byte-{offset:02d}", "type": "crcByte", "offset": offset,
                              "timeoutSec": 6, "pollIntervalSec": 0.25})
+        require(steps[-1] == {"id": "verify-xband-frame", "type": "verifyXbandFrame",
+                              "timeoutSec": 8, "pollIntervalSec": 0.25})
+        canonical_hash(definition)
+        return definition
+    if any(type(step) is dict and step.get("type") == "tcLogPhase" for step in steps):
+        target = definition["supportedTargets"][0]
+        require(definition["id"] == TCLOG["scenarioIds"].get(target) and definition["timeoutSec"] == 120)
+        require(set(refs) == {("CI_LOG_STATUS", "RESULT"), ("CI_LOG_CHUNK", "RESULT"),
+                              ("TC_CAMERA_RESULT", "STATUS")})
+        require(len(steps) == len(TCLOG["phases"]))
+        for step, phase in zip(steps, TCLOG["phases"]):
+            require(step == {"id": phase, "type": "tcLogPhase", "phase": phase})
+        canonical_hash(definition)
+        return definition
+    if any(type(step) is dict and step.get("type") == "pspPhase" for step in steps):
+        target = definition["supportedTargets"][0]
+        require(definition["id"] == PSP["scenarioIds"].get(target) and definition["timeoutSec"] == 120)
+        require(set(refs) == {("MM_DEBUG", "STATUS"), ("MM_DEBUG", "POINTER_SLOT"),
+                              ("PAYLOAD_PULSE_STATE", "STATE"), ("PAYLOAD_PULSE_STATE", "FEED_TARGET_ADDRESS"),
+                              ("PAYLOAD_CTRL_STATE", "FAULT"), ("PAYLOAD_CTRL_STATE", "HALT_ACKED")})
+        require(len(steps) == len(PSP["phases"]))
+        for step, phase in zip(steps, PSP["phases"]):
+            require(step == {"id": phase, "type": "pspPhase", "phase": phase})
         canonical_hash(definition)
         return definition
     seen, waited, pending = set(), set(), set()
@@ -227,6 +260,33 @@ CRC_BYTE_LOOKUP = {cfe_crc16(bytes((byte,))): byte for byte in range(256)}
 require(len(CRC_BYTE_LOOKUP) == 256, "crc_oracle_not_injective")
 
 
+def decode_xband_frame(key, values):
+    """Authenticate one 48-byte XBD1 frame and recover its lab flag."""
+    require(type(key) in (bytes, bytearray) and len(key) == ORACLE["keyBytes"], "invalid_oracle_state")
+    require(type(values) is dict and set(values) == set(XBAND_FIELDS), "xband_frame_invalid")
+    for field in XBAND_FIELDS:
+        width = TELEMETRY_TYPES[f"{ORACLE['xbandPacket']}.{field}"]
+        require(type(values[field]) is int and 0 <= values[field] < (1 << width), "xband_frame_invalid")
+    require(values["MAGIC"] == ORACLE["xbandMagic"], "xband_frame_invalid")
+    header = (values["MAGIC"].to_bytes(4, "big") + values["IV_PREFIX"].to_bytes(4, "big") +
+              values["COUNTER"].to_bytes(8, "big"))
+    ciphertext = b"".join(values[f"CIPHERTEXT_{i}"].to_bytes(4, "big") for i in range(4))
+    tag = b"".join(values[f"TAG_{i}"].to_bytes(4, "big") for i in range(4))
+    try:
+        from cryptography.exceptions import InvalidTag
+        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    except ImportError:
+        raise ScenarioError("xband_crypto_unavailable") from None
+    try:
+        plaintext = AESGCM(bytes(key)).decrypt(header[4:], ciphertext + tag, header)
+    except InvalidTag:
+        raise ScenarioError("xband_auth_failed") from None
+    require(len(plaintext) == 16, "xband_payload_invalid")
+    require(re.fullmatch(rb"flag\{[a-z0-9_]{10}\}", plaintext) is not None,
+            "xband_payload_invalid")
+    return {"sequence": values["COUNTER"], "flag": plaintext.decode("ascii")}
+
+
 class OpenC3Adapter:
     def __init__(self, api, scope, disconnected=False):
         require(not disconnected, "disconnected_mode")
@@ -278,6 +338,12 @@ class OpenC3Adapter:
         require(type(received) in (int, float) and math.isfinite(received) and received >= 0, "invalid_telemetry")
         return PacketSample(dict(zip(fields, (row[0] for row in rows))), count, received,
                             any(row[1] == "STALE" for row in rows))
+
+    def subscribe_packets(self, target, packet):
+        return self.api.subscribe_packets([[target, packet]], scope=self.scope)
+
+    def get_packets(self, cursor):
+        return self.api.get_packets(cursor, count=256, scope=self.scope)
 
 
 class ManagementClient:
@@ -374,6 +440,15 @@ class ScenarioRunner:
     def _preflight(self, definition):
         names = self._call(self.adapter.targets, "targets")
         require(type(names) is list and self.target in set(names).intersection(definition["supportedTargets"]).intersection(ALLOWED_TARGETS), "target_not_installed")
+        self.xband_target = ORACLE["xbandTargets"].get(self.target)
+        if any(step["type"] == "verifyXbandFrame" for step in definition["steps"]):
+            require(self.xband_target in names, "xband_target_not_installed")
+        if any(step["type"] == "tcLogPhase" for step in definition["steps"]):
+            self._preflight_tc_log()
+            return
+        if any(step["type"] == "pspPhase" for step in definition["steps"]):
+            self._preflight_psp()
+            return
         for packet in dict.fromkeys(s["packet"] for s in definition["steps"] if s["type"] == "command"):
             data = self._call(lambda: self.adapter.command_definition(self.target, packet), "command_definition")
             require(type(data) is dict and data.get("target_name") == self.target and data.get("packet_name") == packet, "invalid_command")
@@ -384,8 +459,9 @@ class ScenarioRunner:
             require(all(items[k].get("default") == v for k, v in expected.items()), "command_definition_mismatch")
             require(items["CCSDS_STREAMID"].get("id_value") == expected["CCSDS_STREAMID"], "command_definition_mismatch")
         for packet in dict.fromkeys(ref["packet"] for ref in definition["telemetryItems"]):
-            data = self._call(lambda: self.adapter.telemetry_definition(self.target, packet), "telemetry_definition")
-            require(type(data) is dict and data.get("target_name") == self.target and data.get("packet_name") == packet, "invalid_telemetry_item")
+            telemetry_target = self.xband_target if packet == ORACLE["xbandPacket"] else self.target
+            data = self._call(lambda: self.adapter.telemetry_definition(telemetry_target, packet), "telemetry_definition")
+            require(type(data) is dict and data.get("target_name") == telemetry_target and data.get("packet_name") == packet, "invalid_telemetry_item")
             items = {v["name"]: v for v in data.get("items", [])}
             required = {r["item"] for r in definition["telemetryItems"] if r["packet"] == packet}
             require(required.union(RECEIPT_ITEMS) <= set(items), "invalid_telemetry_item")
@@ -395,6 +471,112 @@ class ScenarioRunner:
             require(all(items[k].get("data_type") == "DERIVED" for k in RECEIPT_ITEMS), "telemetry_definition_mismatch")
         if any(step["type"] == "crcByte" for step in definition["steps"]):
             self._preflight_oracle()
+            self._preflight_xband()
+
+    def _preflight_tc_log(self):
+        fields = {
+            "CI_LOG_STATUS_CMD": (2, {"REQUEST_ID": ("UINT", 16), "RESERVED": ("UINT", 16)}),
+            "CI_LOG_SEAL_CMD": (3, {"REQUEST_ID": ("UINT", 16), "RESERVED": ("UINT", 16)}),
+            "CI_LOG_READ_CMD": (4, {"REQUEST_ID": ("UINT", 16), "FILE_INDEX": ("UINT", 16), "OFFSET": ("UINT", 32)}),
+            "TC_CAMERA_CAPTURE_CMD": (2, {"REQUEST_ID": ("UINT", 16), "FILENAME": ("STRING", 256)}),
+            "CFE_ES_SEND_HK_CMD": (0, {}),
+        }
+        for packet, (function_code, expected_fields) in fields.items():
+            data = self._call(lambda p=packet: self.adapter.command_definition(self.target, p), "command_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet and
+                    not any(data.get(flag) for flag in ("hazardous", "disabled", "hidden")), "invalid_command")
+            items = {item["name"]: item for item in data.get("items", [])}
+            header = dict(HEADER_DEFAULTS, CCSDS_STREAMID=COMMANDS[packet][1], CCSDS_FC=function_code)
+            require(set(items) == set(header) | set(expected_fields) | RESERVED_ITEMS, "command_definition_mismatch")
+            require(all(items[name].get("default") == value for name, value in header.items()) and
+                    items["CCSDS_STREAMID"].get("id_value") == header["CCSDS_STREAMID"], "command_definition_mismatch")
+            require(all((items[name].get("data_type"), items[name].get("bit_size")) == kind_size
+                        for name, kind_size in expected_fields.items()), "command_definition_mismatch")
+        telemetry = {
+            "CI_LOG_STATUS": {"REQUEST_ID": 16, "RESULT": 16, "ACTIVE_INDEX": 16,
+                              "LAST_CLOSED_INDEX": 16, "ACTIVE_RECORDS": 32, "TOTAL_LOGGED": 32,
+                              "WRITE_ERRORS": 32, "READ_ERRORS": 32},
+            "CI_LOG_CHUNK": {"REQUEST_ID": 16, "RESULT": 16, "FILE_INDEX": 16,
+                             "DATA_LENGTH": 16, "OFFSET": 32, "FILE_SIZE": 32, "DATA": 8},
+            "TC_CAMERA_RESULT": {"REQUEST_ID": 16, "STATUS": 16, "BYTES_WRITTEN": 32,
+                                 "FILENAME": 256},
+        }
+        for packet, required in telemetry.items():
+            data = self._call(lambda p=packet: self.adapter.telemetry_definition(self.target, p), "telemetry_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet, "invalid_telemetry_item")
+            items = {item["name"]: item for item in data.get("items", [])}
+            require(set(required) | set(RECEIPT_ITEMS) <= set(items), "invalid_telemetry_item")
+            require(all(items[name].get("data_type") == ("STRING" if name == "FILENAME" else "UINT") and
+                        items[name].get("bit_size") == size for name, size in required.items()),
+                    "telemetry_definition_mismatch")
+            require(all(items[name].get("data_type") == "DERIVED" for name in RECEIPT_ITEMS),
+                    "telemetry_definition_mismatch")
+
+    def _preflight_psp(self):
+        commands = {
+            "MM_CMD_DEBUG_MAP": (13, {"REQUEST_ID": 32}),
+            "MM_CMD_DEBUG_READ": (14, {"REQUEST_ID": 32, "WIDTH_BYTES": 32, "ADDRESS": 64}),
+            "MM_CMD_DEBUG_WRITE": (15, {"REQUEST_ID": 32, "WIDTH_BYTES": 32, "ADDRESS": 64,
+                                         "VALUE": 32, "RESERVED": 32}),
+            "PAYLOAD_PULSE_PAUSE_CMD": (2, {}),
+            "PAYLOAD_PULSE_RESUME_CMD": (3, {}),
+            "PAYLOAD_PULSE_STATUS_CMD": (4, {}),
+            "PAYLOAD_CTRL_STATUS_CMD": (2, {}),
+        }
+        require(set(commands) == set(PSP["commandPackets"]), "invalid_policy")
+        for packet, (function_code, fields) in commands.items():
+            data = self._call(lambda p=packet: self.adapter.command_definition(self.target, p), "command_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet and
+                    not any(data.get(flag) for flag in ("hazardous", "disabled", "hidden")), "invalid_command")
+            items = {item["name"]: item for item in data.get("items", [])}
+            header = dict(HEADER_DEFAULTS, CCSDS_STREAMID=COMMANDS[packet][1], CCSDS_FC=function_code)
+            require(set(items) == set(header) | set(fields) | RESERVED_ITEMS, "command_definition_mismatch")
+            require(all(items[name].get("default") == value for name, value in header.items()) and
+                    items["CCSDS_STREAMID"].get("id_value") == header["CCSDS_STREAMID"],
+                    "command_definition_mismatch")
+            require(all(items[name].get("data_type") == "UINT" and items[name].get("bit_size") == size
+                        for name, size in fields.items()), "command_definition_mismatch")
+        telemetry = {
+            "MM_DEBUG": {"REQUEST_ID": 32, "OPERATION": 32, "STATUS": 32, "WIDTH_BYTES": 32,
+                         "MODULE_START": 64, "MODULE_END": 64, "POINTER_SLOT": 64,
+                         "ADDRESS": 64, "VALUE": 64},
+            "PAYLOAD_PULSE_STATE": {"STATE": 8, "BOUND": 8, "LAST_VALUE": 8,
+                                    "FAULT_LATCH": 8, "PULSE_COUNT": 32, "SLOT_ADDRESS": 32,
+                                    "FEED_TARGET_ADDRESS": 32, "AUTHORIZED_KICK_ADDRESS": 32,
+                                    "BIND_COUNT": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
+            "PAYLOAD_CTRL_STATE": {"MODE": 8, "KICK": 8, "FAULT": 8, "HALT_ACKED": 8,
+                                   "SEEN_TRANSITIONS": 32, "FAULT_COUNT": 32, "KICK_ADDRESS": 32,
+                                   "MODE_ADDRESS": 32, "LAST_FAULT_VALUE": 32,
+                                   "LAST_CONTROL_SEQUENCE": 32},
+        }
+        require(set(telemetry) == set(PSP["telemetryPackets"]), "invalid_policy")
+        for packet, fields in telemetry.items():
+            data = self._call(lambda p=packet: self.adapter.telemetry_definition(self.target, p),
+                              "telemetry_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet, "invalid_telemetry_item")
+            items = {item["name"]: item for item in data.get("items", [])}
+            require(set(fields) | set(RECEIPT_ITEMS) <= set(items), "telemetry_definition_mismatch")
+            require(all(items[name].get("data_type") == "UINT" and items[name].get("bit_size") == size
+                        for name, size in fields.items()) and
+                    all(items[name].get("data_type") == "DERIVED" for name in RECEIPT_ITEMS),
+                    "telemetry_definition_mismatch")
+        event = self._call(lambda: self.adapter.telemetry_definition(self.target, PSP["eventPacket"]),
+                           "telemetry_definition")
+        require(type(event) is dict and event.get("target_name") == self.target and
+                event.get("packet_name") == PSP["eventPacket"], "invalid_telemetry_item")
+        event_items = {item["name"]: item for item in event.get("items", [])}
+        require(event_items.get("PACKET_ID_APP_NAME", {}).get("data_type") == "STRING" and
+                event_items.get("PACKET_ID_APP_NAME", {}).get("bit_size") == 160 and
+                event_items.get("PACKET_ID_EVENT_ID", {}).get("data_type") == "UINT" and
+                event_items.get("PACKET_ID_EVENT_ID", {}).get("bit_size") == 16 and
+                event_items.get("MESSAGE", {}).get("data_type") == "STRING" and
+                event_items.get("MESSAGE", {}).get("bit_size") == 976 and
+                all(event_items.get(name, {}).get("data_type") == "DERIVED" for name in RECEIPT_ITEMS),
+                "telemetry_definition_mismatch")
 
     def _preflight_oracle(self):
         packet = ORACLE["command"]
@@ -403,7 +585,7 @@ class ScenarioRunner:
                 data.get("packet_name") == packet and
                 not any(data.get(flag) for flag in ("hazardous", "disabled", "hidden")), "invalid_command")
         items = {item["name"]: item for item in data.get("items", [])}
-        expected = dict(HEADER_DEFAULTS, CCSDS_STREAMID=ORACLE["streamId"])
+        expected = dict(HEADER_DEFAULTS, CCSDS_STREAMID=ORACLE["streamId"], CCSDS_FC=ORACLE["functionCode"])
         fields = {"ADDRESS", "SIZE", "MAX_BYTES_PER_CYCLE"}
         require(set(items) == set(expected) | fields | RESERVED_ITEMS, "command_definition_mismatch")
         require(all(items[name].get("default") == value for name, value in expected.items()) and
@@ -415,10 +597,23 @@ class ScenarioRunner:
         require(type(data) is dict and data.get("target_name") == self.target and data.get("packet_name") == packet,
                 "invalid_telemetry_item")
         items = {item["name"]: item for item in data.get("items", [])}
-        for name in ("checksumSizeItem", "checksumBusyItem"):
+        for name in ("checksumSizeItem", "checksumBusyItem", "checksumCommandCounterItem", "checksumErrorCounterItem"):
             item = ORACLE[name]
             require(item in items and items[item].get("data_type") == "UINT" and
                     items[item].get("bit_size") == TELEMETRY_TYPES[f"{packet}.{item}"], "telemetry_definition_mismatch")
+
+    def _preflight_xband(self):
+        packet = ORACLE["xbandPacket"]
+        data = self._call(lambda: self.adapter.telemetry_definition(self.xband_target, packet), "telemetry_definition")
+        require(type(data) is dict and data.get("target_name") == self.xband_target and
+                data.get("packet_name") == packet, "invalid_telemetry_item")
+        items = {item["name"]: item for item in data.get("items", [])}
+        require(set(items) - RESERVED_ITEMS == set(XBAND_FIELDS), "telemetry_definition_mismatch")
+        require(items["MAGIC"].get("id_value") == ORACLE["xbandMagic"],
+                "telemetry_definition_mismatch")
+        require(all(items[field].get("data_type") == "UINT" and
+                    items[field].get("bit_size") == TELEMETRY_TYPES[f"{packet}.{field}"]
+                    for field in XBAND_FIELDS), "telemetry_definition_mismatch")
 
     def _delay(self, seconds):
         end = self.monotonic() + seconds
@@ -487,8 +682,13 @@ class ScenarioRunner:
         address = self.key_address + step["offset"]
         packet = ORACLE["checksumPacket"]
         fields = (ORACLE["checksumAddressItem"], ORACLE["checksumSizeItem"],
-                  ORACLE["checksumValueItem"], ORACLE["checksumBusyItem"])
+                  ORACLE["checksumValueItem"], ORACLE["checksumBusyItem"],
+                  ORACLE["checksumCommandCounterItem"], ORACLE["checksumErrorCounterItem"])
         baseline = self._call(lambda: self.adapter.sample_fields(self.target, packet, fields), "baseline")
+        old_commands = baseline.values[ORACLE["checksumCommandCounterItem"]]
+        old_errors = baseline.values[ORACLE["checksumErrorCounterItem"]]
+        require(type(old_commands) is int and 0 <= old_commands <= 255 and
+                type(old_errors) is int and 0 <= old_errors <= 255, "invalid_oracle_counters")
         if self.last_send is not None:
             self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
         self._check_stop()
@@ -506,8 +706,13 @@ class ScenarioRunner:
             self._check_stop()
             sample = self._call(lambda: self.adapter.sample_fields(self.target, packet, fields),
                                 "telemetry", min(2, max(0.001, end - self.monotonic())))
-            reported_address, size, checksum, busy = (sample.values[field] for field in fields)
-            if (not sample.stale and sample.count > baseline.count and sample.received > baseline.received and
+            reported_address, size, checksum, busy, commands, errors = (sample.values[field] for field in fields)
+            fresh = not sample.stale and sample.count > baseline.count and sample.received > baseline.received
+            require(type(commands) is int and 0 <= commands <= 255 and
+                    type(errors) is int and 0 <= errors <= 255, "invalid_oracle_counters")
+            if fresh and (errors - old_errors) % 256 != 0:
+                raise ScenarioError("crc_command_rejected")
+            if (fresh and (commands - old_commands) % 256 == 1 and errors == old_errors and
                     reported_address == address and size == 1 and busy == 0 and type(checksum) is int):
                 crc = checksum & 0xffff  # cFE can sign-extend its int16 CRC to a uint32 TM field.
                 require(crc in CRC_BYTE_LOOKUP, "crc_not_invertible")
@@ -516,9 +721,416 @@ class ScenarioRunner:
                 return {"packet": packet, "item": ORACLE["checksumValueItem"], "value": crc,
                         "received_at": datetime.fromtimestamp(sample.received, timezone.utc).isoformat(),
                         "commandAccepted": True, "telemetryConfirmed": True,
-                        "message": f"0x{address:08x}: CRC 0x{crc:04x} -> byte 0x{value:02x}"}
+                        "message": f"0x{address:08x}: CRC 0x{crc:04x}, byte {step['offset'] + 1}/16 recovered"}
             self.sleep(min(step["pollIntervalSec"], end - self.monotonic(), self._remaining()))
         raise ScenarioError("crc_telemetry_timeout")
+
+    def _verify_xband_frame(self, step):
+        require(hasattr(self, "recovered") and len(self.recovered) == ORACLE["keyBytes"],
+                "incomplete_key")
+        packet = ORACLE["xbandPacket"]
+        baseline = self._call(lambda: self.adapter.sample_fields(self.xband_target, packet, XBAND_FIELDS),
+                              "baseline")
+        end = min(self.deadline, self.monotonic() + step["timeoutSec"])
+        for _ in range(math.ceil(step["timeoutSec"] / step["pollIntervalSec"]) + 1):
+            if self.monotonic() >= end:
+                break
+            self._check_stop()
+            sample = self._call(lambda: self.adapter.sample_fields(self.xband_target, packet, XBAND_FIELDS),
+                                "telemetry", min(2, max(0.001, end - self.monotonic())))
+            fresh = not sample.stale and sample.count > baseline.count and sample.received > baseline.received
+            if fresh:
+                decoded = decode_xband_frame(self.recovered, sample.values)
+                self.xband_verified = True
+                return {"packet": packet, "item": "COUNTER", "value": sample.values["COUNTER"],
+                        "received_at": datetime.fromtimestamp(sample.received, timezone.utc).isoformat(),
+                        "telemetryConfirmed": True, "authenticated": True,
+                        "message": (f"XBD1 frame {decoded['sequence']} AES-GCM authenticated; "
+                                    f"decrypted flag: {decoded['flag']}")}
+            remaining = end - self.monotonic()
+            if remaining > 0:
+                self.sleep(min(step["pollIntervalSec"], remaining, self._remaining()))
+        raise ScenarioError("xband_telemetry_timeout")
+
+    def _tc_next_request_id(self):
+        if not hasattr(self, "tc_request_id"):
+            self.tc_request_id = int(self.wall_time() * 1000) & 0xffff
+        self.tc_request_id = (self.tc_request_id + 1) & 0xffff
+        return self.tc_request_id
+
+    def _tc_request(self, command, parameters, response_packet, fields, result_field):
+        request_id = self._tc_next_request_id()
+        parameters = dict(parameters, REQUEST_ID=request_id)
+        baseline = self._call(lambda: self.adapter.sample_fields(self.target, response_packet, fields), "baseline")
+        if self.last_send is not None:
+            self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
+        self._check_stop()
+        sent_at = self.wall_time()
+        self.last_send = self.monotonic()
+        timeout = self._remaining(2)
+        accepted = self._call(lambda: self.adapter.command(self.target, command, parameters, timeout),
+                              "command", timeout)
+        require(type(accepted) is dict and accepted.get("target_name") == self.target and
+                accepted.get("cmd_name") == command, "command_not_accepted")
+        end = min(self.deadline, self.monotonic() + 10)
+        for _ in range(41):
+            if self.monotonic() >= end:
+                break
+            self._check_stop()
+            sample = self._call(lambda: self.adapter.sample_fields(self.target, response_packet, fields),
+                                "telemetry", min(2, max(0.001, end - self.monotonic())))
+            now = self.wall_time()
+            fresh = (not sample.stale and sample.count > baseline.count and
+                     sample.received > baseline.received and sample.received >= int(sent_at) - 1 and
+                     -1 <= now - sample.received <= 5)
+            if fresh and sample.values.get("REQUEST_ID") == request_id:
+                result = sample.values.get(result_field)
+                require(type(result) is int and 0 <= result <= 6, "invalid_telemetry")
+                require(result == 0, f"tc_result_{result}")
+                return sample
+            self.sleep(min(0.25, max(0, end - self.monotonic()), self._remaining()))
+        raise ScenarioError("tc_telemetry_timeout")
+
+    def _tc_status(self, seal=False):
+        fields = ("REQUEST_ID", "RESULT", "ACTIVE_INDEX", "LAST_CLOSED_INDEX",
+                  "ACTIVE_RECORDS", "TOTAL_LOGGED", "WRITE_ERRORS", "READ_ERRORS")
+        command = "CI_LOG_SEAL_CMD" if seal else "CI_LOG_STATUS_CMD"
+        return self._tc_request(command, {"RESERVED": 0}, "CI_LOG_STATUS", fields, "RESULT")
+
+    def _tc_read(self, index):
+        fields = ("REQUEST_ID", "RESULT", "FILE_INDEX", "DATA_LENGTH", "OFFSET", "FILE_SIZE", "DATA")
+        sample = self._tc_request("CI_LOG_READ_CMD", {"FILE_INDEX": index, "OFFSET": 0},
+                                  "CI_LOG_CHUNK", fields, "RESULT")
+        values = sample.values
+        length, size, raw = values["DATA_LENGTH"], values["FILE_SIZE"], values["DATA"]
+        require(values["FILE_INDEX"] == index and values["OFFSET"] == 0 and
+                type(length) is int and 0 < length <= TCLOG["maxChunkBytes"] and
+                type(size) is int and length <= size, "invalid_log_chunk")
+        if type(raw) in (bytes, bytearray):
+            data = bytes(raw)
+        elif (type(raw) in (list, tuple) and len(raw) == TCLOG["maxChunkBytes"] and
+              all(type(value) is int and 0 <= value <= 255 for value in raw)):
+            data = bytes(raw)
+        else:
+            raise ScenarioError("invalid_log_chunk")
+        require(len(data) == TCLOG["maxChunkBytes"] and all(value == 0 for value in data[length:]),
+                "invalid_log_chunk")
+        return data[:length], size, sample.received
+
+    def _tc_camera(self, filename):
+        fields = ("REQUEST_ID", "STATUS", "BYTES_WRITTEN", "FILENAME")
+        sample = self._tc_request("TC_CAMERA_CAPTURE_CMD", {"FILENAME": filename},
+                                  "TC_CAMERA_RESULT", fields, "STATUS")
+        count = sample.values["BYTES_WRITTEN"]
+        require(type(count) is int and 8 <= count <= 1048576, "invalid_photo_size")
+        return count, sample.received
+
+    def _tc_hk(self):
+        if self.last_send is not None:
+            self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
+        self._check_stop()
+        self.last_send = self.monotonic()
+        timeout = self._remaining(2)
+        accepted = self._call(lambda: self.adapter.command(self.target, "CFE_ES_SEND_HK_CMD", {}, timeout),
+                              "command", timeout)
+        require(type(accepted) is dict and accepted.get("target_name") == self.target and
+                accepted.get("cmd_name") == "CFE_ES_SEND_HK_CMD", "command_not_accepted")
+
+    def _tc_log_phase(self, step):
+        phase = step["phase"]
+        if phase == "seal-baseline":
+            values = self._tc_status(seal=True).values
+            require(values["WRITE_ERRORS"] == 0 and values["LAST_CLOSED_INDEX"] >= 1 and
+                    values["ACTIVE_INDEX"] > values["LAST_CLOSED_INDEX"], "log_not_ready")
+            self.tc_baseline_index = values["LAST_CLOSED_INDEX"]
+            return {"file_index": self.tc_baseline_index, "message": "Closed the previous onboard TC log",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "record-normal":
+            require(hasattr(self, "tc_baseline_index"), "invalid_log_state")
+            self._tc_hk()
+            count, received = self._tc_camera(TCLOG["normalFilename"])
+            return {"filename": TCLOG["normalFilename"], "photo_bytes": count,
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Normal camera TC and housekeeping TC accepted",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "seal-target":
+            values = self._tc_status(seal=True).values
+            index = values["LAST_CLOSED_INDEX"]
+            require(type(index) is int and self.tc_baseline_index < index <= 9999 and
+                    values["ACTIVE_INDEX"] > index and values["WRITE_ERRORS"] == 0,
+                    "target_log_unavailable")
+            self.tc_target_index = index
+            self.tc_total_before = values["TOTAL_LOGGED"]
+            return {"file_index": index, "total_logged": self.tc_total_before,
+                    "message": f"Sealed onboard /cf/log/tc{index:04d}.log",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        require(hasattr(self, "tc_target_index"), "invalid_log_state")
+        if phase == "read-before":
+            data, size, received = self._tc_read(self.tc_target_index)
+            require(data.startswith(b"TCLOG v1\n") and b"mid=0x18E2" in data,
+                    "expected_tc_log_missing")
+            self.tc_before = data
+            return {"file_index": self.tc_target_index, "file_size": size,
+                    "before_text": data.decode("ascii", errors="replace"), "before_hex": data.hex(),
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Read original onboard TC log bytes", "telemetryConfirmed": True}
+        if phase == "overwrite-log":
+            require(hasattr(self, "tc_before"), "invalid_log_state")
+            filename = f"../log/tc{self.tc_target_index:04d}.log"
+            count, received = self._tc_camera(filename)
+            self.tc_photo_bytes = count
+            return {"file_index": self.tc_target_index, "filename": filename, "photo_bytes": count,
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Camera reported writing the chosen filename",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "read-after":
+            require(hasattr(self, "tc_photo_bytes"), "invalid_log_state")
+            data, size, received = self._tc_read(self.tc_target_index)
+            require(data.startswith(bytes.fromhex(TCLOG["imageSignatureHex"])) and
+                    size == self.tc_photo_bytes and data != self.tc_before,
+                    "log_overwrite_unconfirmed")
+            return {"file_index": self.tc_target_index, "file_size": size,
+                    "after_hex": data.hex(), "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "message": "Same onboard log path now contains PNG bytes", "telemetryConfirmed": True}
+        if phase == "confirm-continuity":
+            values = self._tc_status().values
+            require(values["WRITE_ERRORS"] == 0 and values["ACTIVE_INDEX"] > self.tc_target_index and
+                    values["ACTIVE_RECORDS"] > 0 and values["TOTAL_LOGGED"] > self.tc_total_before,
+                    "logging_not_continuing")
+            return {"active_index": values["ACTIVE_INDEX"], "total_logged": values["TOTAL_LOGGED"],
+                    "write_errors": values["WRITE_ERRORS"],
+                    "message": "Later TC packets continue in the next onboard log",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        raise ScenarioError("invalid_log_phase")
+
+    def _psp_next_request_id(self):
+        if not hasattr(self, "psp_request_id"):
+            self.psp_request_id = int(self.wall_time() * 1000) & 0xffffffff
+        self.psp_request_id = (self.psp_request_id + 1) & 0xffffffff
+        return self.psp_request_id
+
+    def _psp_exchange(self, command, parameters, packet, fields, predicate, *, request=False, seconds=10):
+        fields = tuple(fields)
+        baseline = self._call(lambda: self.adapter.sample_fields(self.target, packet, fields), "baseline")
+        if self.last_send is not None:
+            self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
+        self._check_stop()
+        arguments = dict(parameters)
+        request_id = self._psp_next_request_id() if request else None
+        if request:
+            arguments["REQUEST_ID"] = request_id
+        sent_at = self.wall_time()
+        self.last_send = self.monotonic()
+        timeout = self._remaining(2)
+        accepted = self._call(lambda: self.adapter.command(self.target, command, arguments, timeout),
+                              "command", timeout)
+        require(type(accepted) is dict and accepted.get("target_name") == self.target and
+                accepted.get("cmd_name") == command, "command_not_accepted")
+        end = min(self.deadline, self.monotonic() + seconds)
+        for _ in range(math.ceil(seconds / 0.25) + 1):
+            if self.monotonic() >= end:
+                break
+            self._check_stop()
+            sample = self._call(lambda: self.adapter.sample_fields(self.target, packet, fields),
+                                "telemetry", min(2, max(0.001, end - self.monotonic())))
+            now = self.wall_time()
+            fresh = (not sample.stale and sample.count > baseline.count and
+                     sample.received > baseline.received and sample.received >= int(sent_at) - 1 and
+                     -1 <= now - sample.received <= 5)
+            if fresh and (not request or sample.values.get("REQUEST_ID") == request_id) and predicate(sample.values):
+                return sample
+            self.sleep(min(0.25, max(0, end - self.monotonic()), self._remaining()))
+        raise ScenarioError("psp_telemetry_timeout")
+
+    def _psp_debug(self, operation, parameters, expected_status=0):
+        fields = ("REQUEST_ID", "OPERATION", "STATUS", "WIDTH_BYTES", "MODULE_START",
+                  "MODULE_END", "POINTER_SLOT", "ADDRESS", "VALUE")
+        sample = self._psp_exchange(operation, parameters, "MM_DEBUG", fields,
+                                    lambda v: v.get("OPERATION") == {
+                                        "MM_CMD_DEBUG_MAP": 13,
+                                        "MM_CMD_DEBUG_READ": 14,
+                                        "MM_CMD_DEBUG_WRITE": 15,
+                                    }[operation], request=True)
+        status = sample.values["STATUS"]
+        require(type(status) is int and 0 <= status <= 7, "invalid_debug_status")
+        require(status == expected_status, f"debug_status_{status}")
+        return sample
+
+    def _psp_pulse(self, command, predicate):
+        fields = ("STATE", "BOUND", "LAST_VALUE", "FAULT_LATCH", "PULSE_COUNT",
+                  "SLOT_ADDRESS", "FEED_TARGET_ADDRESS", "AUTHORIZED_KICK_ADDRESS",
+                  "BIND_COUNT", "LAST_ACTION", "LAST_ERROR")
+        return self._psp_exchange(command, {}, "PAYLOAD_PULSE_STATE", fields, predicate)
+
+    def _psp_ctrl(self, command="PAYLOAD_CTRL_STATUS_CMD", predicate=lambda _v: True):
+        fields = ("MODE", "KICK", "FAULT", "HALT_ACKED", "SEEN_TRANSITIONS",
+                  "FAULT_COUNT", "KICK_ADDRESS", "MODE_ADDRESS", "LAST_FAULT_VALUE",
+                  "LAST_CONTROL_SEQUENCE")
+        return self._psp_exchange(command, {}, "PAYLOAD_CTRL_STATE", fields, predicate)
+
+    def _psp_phase(self, step):
+        phase = step["phase"]
+        if phase == "baseline":
+            pulse = self._psp_pulse("PAYLOAD_PULSE_STATUS_CMD",
+                                    lambda v: v.get("STATE") == 1 and v.get("BOUND") == 1 and
+                                    v.get("FAULT_LATCH") == 0).values
+            ctrl_sample = self._psp_ctrl(predicate=lambda v: v.get("FAULT") == 0 and
+                                         v.get("HALT_ACKED") == 0)
+            ctrl = ctrl_sample.values
+            kick, mode = ctrl["KICK_ADDRESS"], ctrl["MODE_ADDRESS"]
+            require(all(type(v) is int and 0x10000 <= v <= 0xffffffff for v in (kick, mode)),
+                    "invalid_payload_addresses")
+            require((kick & ~0xff) == (mode & ~0xff) and
+                    (kick & 0xff) == PSP["expectedKickLowByte"] and
+                    (mode & 0xff) == PSP["expectedModeLowByte"], "invalid_payload_layout")
+            require(pulse["AUTHORIZED_KICK_ADDRESS"] == kick and
+                    pulse["FEED_TARGET_ADDRESS"] == kick and type(ctrl["MODE"]) is int and
+                    type(pulse["LAST_VALUE"]) is int and pulse["LAST_VALUE"] != ctrl["MODE"],
+                    "payload_not_ready")
+            self.psp_kick, self.psp_mode = kick, mode
+            self.psp_normal_mode = ctrl["MODE"]
+            self.psp_ctrl_baseline_count = ctrl_sample.count
+            self.psp_pulse_count = pulse["PULSE_COUNT"]
+            self.psp_slot_reported = pulse["SLOT_ADDRESS"]
+            self.psp_pulse_value = pulse["LAST_VALUE"]
+            return {"kick_address": kick, "mode_address": mode, "mode_before": self.psp_normal_mode,
+                    "pulse_count": self.psp_pulse_count, "message": "Controller mode valid; pulse writes normal kick byte",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        require(hasattr(self, "psp_kick"), "invalid_psp_state")
+        if phase == "map":
+            values = self._psp_debug("MM_CMD_DEBUG_MAP", {}).values
+            start, end, slot = (values[k] for k in ("MODULE_START", "MODULE_END", "POINTER_SLOT"))
+            require(all(type(v) is int for v in (start, end, slot)) and
+                    0x10000 <= start <= slot and slot + PSP["pointerBytes"] <= end <= 0x100000000 and
+                    slot == self.psp_slot_reported, "invalid_debug_map")
+            require(not start <= self.psp_mode < end, "victim_inside_debug_range")
+            self.psp_slot, self.psp_module = slot, (start, end)
+            return {"module_start": start, "module_end": end, "pointer_slot": slot,
+                    "message": f"MM located PAYLOAD_PULSE_APP writable range and pointer slot 0x{slot:08x}",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        require(hasattr(self, "psp_slot"), "invalid_psp_state")
+        if phase == "deny-direct-write":
+            values = self._psp_debug("MM_CMD_DEBUG_WRITE", {"WIDTH_BYTES": 1,
+                                     "ADDRESS": self.psp_mode, "VALUE": self.psp_normal_mode,
+                                     "RESERVED": 0}, expected_status=3).values
+            require(values["ADDRESS"] == self.psp_mode, "invalid_debug_denial")
+            return {"denied_address": self.psp_mode, "debug_status": 3,
+                    "message": "MM denied direct write to protected controller mode",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "pause":
+            values = self._psp_pulse("PAYLOAD_PULSE_PAUSE_CMD",
+                                      lambda v: v.get("STATE") == 2 and v.get("LAST_ACTION") == 3).values
+            require(values["FEED_TARGET_ADDRESS"] == self.psp_kick, "pulse_pointer_changed_early")
+            self.psp_pause_count = values["PULSE_COUNT"]
+            return {"pulse_count": values["PULSE_COUNT"], "message": "Pulse writes paused before pointer edit",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        require(hasattr(self, "psp_pause_count"), "invalid_psp_state")
+        if phase == "read-pointer":
+            values = self._psp_debug("MM_CMD_DEBUG_READ", {"WIDTH_BYTES": 4,
+                                     "ADDRESS": self.psp_slot}).values
+            pointer = values["VALUE"]
+            require(values["ADDRESS"] == self.psp_slot and values["WIDTH_BYTES"] == 4 and
+                    pointer == self.psp_kick, "pointer_read_mismatch")
+            self.psp_pointer_before = pointer
+            return {"pointer_before": pointer, "pointer_slot": self.psp_slot,
+                    "message": f"Read four-byte pulse pointer 0x{pointer:08x}",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        require(hasattr(self, "psp_pointer_before"), "invalid_psp_state")
+        if phase == "write-pointer-byte":
+            values = self._psp_debug("MM_CMD_DEBUG_WRITE", {"WIDTH_BYTES": 1,
+                                     "ADDRESS": self.psp_slot,
+                                     "VALUE": self.psp_mode & 0xff, "RESERVED": 0}).values
+            require(values["ADDRESS"] == self.psp_slot and values["WIDTH_BYTES"] == 1,
+                    "pointer_write_mismatch")
+            return {"pointer_slot": self.psp_slot, "byte_before": self.psp_kick & 0xff,
+                    "byte_after": self.psp_mode & 0xff,
+                    "message": "MM changed only the permitted pointer's low byte",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "verify-pointer":
+            values = self._psp_debug("MM_CMD_DEBUG_READ", {"WIDTH_BYTES": 4,
+                                     "ADDRESS": self.psp_slot}).values
+            require(values["VALUE"] == self.psp_mode and values["ADDRESS"] == self.psp_slot,
+                    "pointer_change_unconfirmed")
+            return {"pointer_after": self.psp_mode, "pointer_before": self.psp_pointer_before,
+                    "message": f"Pulse pointer now targets controller mode 0x{self.psp_mode:08x}",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        if phase == "resume":
+            self.psp_es_cursor = self._call(
+                lambda: self.adapter.subscribe_packets(self.target, PSP["eventPacket"]),
+                "event_subscription")
+            require(type(self.psp_es_cursor) is str and 0 < len(self.psp_es_cursor) <= 1024,
+                    "event_subscription_invalid")
+            values = self._psp_pulse("PAYLOAD_PULSE_RESUME_CMD",
+                                      lambda v: v.get("LAST_ACTION") in (4, 5) and
+                                      v.get("STATE") in (1, 3)).values
+            require(values["FEED_TARGET_ADDRESS"] == self.psp_mode, "pulse_target_mismatch")
+            return {"pulse_target": self.psp_mode, "pulse_count": values["PULSE_COUNT"],
+                    "message": "Pulse resumed with redirected target", "commandAccepted": True,
+                    "telemetryConfirmed": True}
+        if phase == "observe-fault":
+            # Controller emits a second STATE after receiving the internal HALT ACK.
+            fields = ("MODE", "KICK", "FAULT", "HALT_ACKED", "FAULT_COUNT",
+                      "LAST_FAULT_VALUE", "MODE_ADDRESS")
+            end = min(self.deadline, self.monotonic() + 12)
+            for _ in range(49):
+                self._check_stop()
+                sample = self._call(lambda: self.adapter.sample_fields(self.target, "PAYLOAD_CTRL_STATE", fields),
+                                    "telemetry")
+                v = sample.values
+                if (not sample.stale and sample.count > self.psp_ctrl_baseline_count and
+                        v.get("FAULT") == 1 and
+                        v.get("HALT_ACKED") == 1 and v.get("MODE_ADDRESS") == self.psp_mode and
+                        v.get("MODE") in (0x5a, 0xa5) and
+                        v.get("LAST_FAULT_VALUE") == v.get("MODE") and
+                        type(v.get("FAULT_COUNT")) is int and v["FAULT_COUNT"] >= 1):
+                    return {"mode_after": v["MODE"], "fault_count": v["FAULT_COUNT"],
+                            "halt_acked": 1, "message": "Controller saw invalid mode, obtained pulse HALT ACK and requested APP_ERROR exit",
+                            "telemetryConfirmed": True}
+                if self.monotonic() >= end:
+                    break
+                self.sleep(min(0.25, end - self.monotonic(), self._remaining()))
+            raise ScenarioError("controller_fault_unconfirmed")
+        if phase == "confirm-es-exit":
+            require(hasattr(self, "psp_es_cursor"), "invalid_psp_state")
+            end = min(self.deadline, self.monotonic() + 15)
+            for _ in range(61):
+                self._check_stop()
+                response = self._call(lambda: self.adapter.get_packets(self.psp_es_cursor), "telemetry")
+                require(type(response) in (list, tuple) and len(response) == 2,
+                        "invalid_event_stream")
+                cursor, packets = response
+                require(type(cursor) is str and 0 < len(cursor) <= 1024 and
+                        type(packets) is list and len(packets) <= 256,
+                        "invalid_event_stream")
+                self.psp_es_cursor = cursor
+                for event in packets:
+                    require(type(event) is dict, "invalid_event_stream")
+                    app = event.get("PACKET_ID_APP_NAME")
+                    message = event.get("MESSAGE")
+                    if (event.get("target_name") == self.target and
+                            event.get("packet_name") == PSP["eventPacket"] and
+                            event.get("PACKET_ID_EVENT_ID") == PSP["esExitEventId"] and
+                            type(app) is str and app.rstrip("\x00") == "CFE_ES" and
+                            type(message) is str and
+                            message.rstrip("\x00") == "Exit Application PAYLOAD_CTRL_APP Completed."):
+                        return {"es_event_id": PSP["esExitEventId"],
+                                "es_event_message": message.rstrip("\x00"),
+                                "message": "cFE ES confirmed PAYLOAD_CTRL_APP APP_ERROR cleanup event 14",
+                                "telemetryConfirmed": True}
+                if self.monotonic() >= end:
+                    break
+                self.sleep(min(0.25, end - self.monotonic(), self._remaining()))
+            raise ScenarioError("es_app_error_unconfirmed")
+        if phase == "confirm-pulse":
+            values = self._psp_pulse("PAYLOAD_PULSE_STATUS_CMD",
+                                      lambda v: v.get("STATE") == 3 and v.get("FAULT_LATCH") == 1).values
+            require(values["FEED_TARGET_ADDRESS"] == self.psp_mode and
+                    type(values["PULSE_COUNT"]) is int and values["PULSE_COUNT"] > self.psp_pause_count,
+                    "pulse_survival_unconfirmed")
+            return {"pulse_count": values["PULSE_COUNT"], "pulse_target": values["FEED_TARGET_ADDRESS"],
+                    "message": "Pulse app remains alive and halted after controller fault",
+                    "commandAccepted": True, "telemetryConfirmed": True}
+        raise ScenarioError("invalid_psp_phase")
 
     def run(self):
         try:
@@ -548,12 +1160,23 @@ class ScenarioRunner:
                     data = self._resolve_address(step)
                 elif step["type"] == "crcByte":
                     data = self._crc_byte(step)
+                elif step["type"] == "verifyXbandFrame":
+                    data = self._verify_xband_frame(step)
+                elif step["type"] == "tcLogPhase":
+                    data = self._tc_log_phase(step)
+                elif step["type"] == "pspPhase":
+                    data = self._psp_phase(step)
                 else:
                     data = self._wait_telemetry(step)
                 self._emit("step", dict(data, step_id=step["id"], status="succeeded"))
             if hasattr(self, "recovered"):
-                require(len(self.recovered) == ORACLE["keyBytes"], "incomplete_key")
-                message = "Recovered X-band lab key: " + self.recovered.hex()
+                require(len(self.recovered) == ORACLE["keyBytes"] and
+                        getattr(self, "xband_verified", False), "incomplete_key")
+                message = f"Recovered X-band lab key: {bytes(self.recovered).hex()}"
+            elif hasattr(self, "tc_target_index"):
+                message = f"Onboard TC log tc{self.tc_target_index:04d}.log replaced by the demo photo"
+            elif hasattr(self, "psp_pointer_before"):
+                message = "MM direct controller write denied; one pulse pointer byte redirected a normal write and controller exited APP_ERROR"
             else:
                 message = "All steps completed with fresh telemetry"
             self._emit("result", {"status": "succeeded", "message": message})

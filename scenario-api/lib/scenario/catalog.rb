@@ -40,14 +40,21 @@ module Scenario
       check(d['version'].is_a?(String) && d['version'].length <= 32 && /\A[0-9]+\.[0-9]+\.[0-9]+\z/.match?(d['version']))
       { 'name' => 120, 'description' => 1000 }.each { |key, max| check(d[key].is_a?(String) && d[key].length.between?(1, max)) }
       check(d['supportedTargets'].is_a?(Array) && d['supportedTargets'].size == 1 && @policy.fetch('allowedTargets').include?(d['supportedTargets'][0]))
+      if d['supportedTargets'][0] == 'CFS-1_BBB'
+        check([@policy.fetch('tcLogTraversal').fetch('scenarioIds').fetch('CFS-1_BBB'),
+               @policy.fetch('pspIndirectWrite').fetch('scenarioIds').fetch('CFS-1_BBB'),
+               @policy.fetch('crcKeyOracle').fetch('scenarioTargets').key(d['supportedTargets'][0])].include?(d['id']))
+      end
       number!(d['timeoutSec'], 1, 120)
       check(d['successCriteria'] == { 'type' => 'allStepsSucceeded', 'requireFreshTelemetry' => true })
-      check(d['telemetryItems'].is_a?(Array) && d['telemetryItems'].size.between?(1, 16))
+      check(d['telemetryItems'].is_a?(Array) && d['telemetryItems'].size.between?(1, 20))
       refs = d['telemetryItems'].map { |t| reference!(t) }
       check(refs.uniq.size == refs.size)
-      check(d['steps'].is_a?(Array) && d['steps'].size.between?(2, 17) && d['steps'].all? { |s| s.is_a?(Hash) })
+      check(d['steps'].is_a?(Array) && d['steps'].size.between?(2, 18) && d['steps'].all? { |s| s.is_a?(Hash) })
       check(d['steps'].map { |s| s['id'] }.uniq.size == d['steps'].size)
       return validate_crc_oracle!(d, refs) if d['steps'].any? { |s| %w[resolveAddress crcByte].include?(s['type']) }
+      return validate_tc_log!(d, refs) if d['steps'].any? { |s| s['type'] == 'tcLogPhase' }
+      return validate_psp!(d, refs) if d['steps'].any? { |s| s['type'] == 'pspPhase' }
       pending, waited, total, commands = [], [], 0, 0
       d['steps'].each do |s|
         definition_id!(s['id'])
@@ -87,23 +94,57 @@ module Scenario
     def validate_crc_oracle!(definition, refs)
       policy = @policy.fetch('crcKeyOracle')
       steps = definition['steps']
-      check(definition['id'] == 'qemu-cs-crc-key-oracle' && definition['timeoutSec'] == 120)
-      check(steps.size == policy.fetch('keyBytes') + 1)
+      target = policy.fetch('scenarioTargets')[definition['id']]
+      check(target && definition['supportedTargets'] == [target] && definition['timeoutSec'] == 120)
+      check(steps.size == policy.fetch('keyBytes') + 2)
       check(refs.sort == [
         [policy.fetch('keyPacket'), policy.fetch('keyAddressItem')],
         [policy.fetch('keyPacket'), policy.fetch('keyLengthItem')],
         [policy.fetch('keyPacket'), policy.fetch('channelReadyItem')],
         [policy.fetch('checksumPacket'), policy.fetch('checksumAddressItem')],
-        [policy.fetch('checksumPacket'), policy.fetch('checksumValueItem')]
+        [policy.fetch('checksumPacket'), policy.fetch('checksumValueItem')],
+        [policy.fetch('checksumPacket'), policy.fetch('checksumCommandCounterItem')],
+        [policy.fetch('checksumPacket'), policy.fetch('checksumErrorCounterItem')],
+        *%w[MAGIC IV_PREFIX COUNTER CIPHERTEXT_0 CIPHERTEXT_1 CIPHERTEXT_2 CIPHERTEXT_3 TAG_0 TAG_1 TAG_2 TAG_3].map { |item| [policy.fetch('xbandPacket'), item] }
       ].sort)
       first = steps.first
       keys!(first, %w[id type timeoutSec pollIntervalSec])
       check(first['id'] == 'locate-key' && first['type'] == 'resolveAddress')
       check(first['timeoutSec'] == 10 && first['pollIntervalSec'] == 0.5)
-      steps.drop(1).each_with_index do |step, offset|
+      steps[1...-1].each_with_index do |step, offset|
         keys!(step, %w[id type offset timeoutSec pollIntervalSec])
         check(step == {'id' => format('recover-byte-%02d', offset), 'type' => 'crcByte',
                        'offset' => offset, 'timeoutSec' => 6, 'pollIntervalSec' => 0.25})
+      end
+      check(steps.last == {'id' => 'verify-xband-frame', 'type' => 'verifyXbandFrame',
+                           'timeoutSec' => 8, 'pollIntervalSec' => 0.25})
+    end
+
+    def validate_tc_log!(definition, refs)
+      policy = @policy.fetch('tcLogTraversal')
+      target = definition['supportedTargets'].first
+      check(definition['id'] == policy.fetch('scenarioIds')[target] && definition['timeoutSec'] == 120)
+      check(refs.sort == [['CI_LOG_STATUS', 'RESULT'], ['CI_LOG_CHUNK', 'RESULT'], ['TC_CAMERA_RESULT', 'STATUS']].sort)
+      phases = policy.fetch('phases')
+      check(definition['steps'].size == phases.size)
+      definition['steps'].zip(phases).each do |step, phase|
+        keys!(step, %w[id type phase])
+        check(step == {'id' => phase, 'type' => 'tcLogPhase', 'phase' => phase})
+      end
+    end
+
+    def validate_psp!(definition, refs)
+      policy = @policy.fetch('pspIndirectWrite')
+      target = definition['supportedTargets'].first
+      check(definition['id'] == policy.fetch('scenarioIds')[target] && definition['timeoutSec'] == 120)
+      check(refs.sort == [['MM_DEBUG', 'STATUS'], ['MM_DEBUG', 'POINTER_SLOT'],
+                          ['PAYLOAD_PULSE_STATE', 'STATE'], ['PAYLOAD_PULSE_STATE', 'FEED_TARGET_ADDRESS'],
+                          ['PAYLOAD_CTRL_STATE', 'FAULT'], ['PAYLOAD_CTRL_STATE', 'HALT_ACKED']].sort)
+      phases = policy.fetch('phases')
+      check(definition['steps'].size == phases.size)
+      definition['steps'].zip(phases).each do |step, phase|
+        keys!(step, %w[id type phase])
+        check(step == {'id' => phase, 'type' => 'pspPhase', 'phase' => phase})
       end
     end
 
@@ -121,7 +162,9 @@ module Scenario
 
     def reference!(ref)
       keys!(ref, %w[packet item])
-      check(@policy.fetch('commands').values.any? { |c| c['telemetryPacket'] == ref['packet'] } && @policy.fetch('telemetryItems').include?(ref['item']))
+      packets = @policy.fetch('commands').values.map { |c| c['telemetryPacket'] } +
+                @policy.fetch('passiveTelemetryPackets')
+      check(packets.include?(ref['packet']) && @policy.fetch('telemetryItems').include?(ref['item']))
       [ref['packet'], ref['item']]
     end
 

@@ -56,4 +56,30 @@ class CatalogTest < ScenarioTest
     d['telemetryItems'] << { 'packet' => 'CFE_EVS_HK', 'item' => 'COMMAND_COUNTER' }
     assert_error('invalid_catalog') { validate(d) }
   end
+
+  def test_tc_log_demo_is_fixed_for_each_target
+    %w[qemu bbb].each do |platform|
+      d = @catalog.get("#{platform}-tc-log-photo-traversal")
+      assert validate(d)
+      d['steps'][4]['phase'] = 'read-after'
+      assert_error('invalid_catalog') { validate(d) }
+      d = @catalog.get("#{platform}-tc-log-photo-traversal")
+      d['telemetryItems'] << {'packet' => 'CFE_ES_HK', 'item' => 'COMMAND_COUNTER'}
+      assert_error('invalid_catalog') { validate(d) }
+    end
+  end
+
+  def test_crc_oracle_is_fixed_to_its_target_and_requires_xband_authentication
+    { 'qemu-cs-crc-key-oracle' => 'CFS-1_QEMU', 'bbb-cs-crc-key-oracle' => 'CFS-1_BBB' }.each do |id, target|
+      definition = @catalog.get(id)
+      assert_equal [target], definition['supportedTargets']
+      assert_equal 18, definition['steps'].size
+      assert validate(definition)
+      definition['supportedTargets'] = [target == 'CFS-1_QEMU' ? 'CFS-1_BBB' : 'CFS-1_QEMU']
+      assert_error('invalid_catalog') { validate(definition) }
+      definition = @catalog.get(id)
+      definition['steps'].pop
+      assert_error('invalid_catalog') { validate(definition) }
+    end
+  end
 end

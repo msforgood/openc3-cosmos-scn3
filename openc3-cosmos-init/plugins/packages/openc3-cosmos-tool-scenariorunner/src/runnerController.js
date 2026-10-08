@@ -14,7 +14,7 @@ export function runStatus(run) {
 }
 export function initialRunnerState() {
   return { target: '', run: null, status: 'ready', discovering: false, starting: false, acting: false,
-    error: '', apiConnected: null, lastContact: null, logs: [], steps: {}, cursor: 0, prompt: null,
+    error: '', startRejection: '', apiConnected: null, lastContact: null, logs: [], steps: {}, cursor: 0, prompt: null,
     pendingRequest: null, requestFailure: null, recoveryNeeded: false }
 }
 export class RunnerController {
@@ -38,6 +38,11 @@ export class RunnerController {
   get locked() { return Boolean(this.state.starting || this.state.discovering || this.state.pendingRequest ||
     this.state.recoveryNeeded || ACTIVE_STATUSES.has(this.state.status) || (this.state.run && !terminal.has(this.state.run.state))) }
   get key() { return `${STORAGE_PREFIX}.${this.scope}.run.${this.state.target}` }
+  clearStartRejection() {
+    if (!this.state.startRejection) return
+    this.state.startRejection = ''
+    this.state.error = ''
+  }
   save(value) { try { this.storage.setItem(this.key, JSON.stringify(value)) } catch { /* Storage can be disabled. */ } }
   saved() { try { return JSON.parse(this.storage.getItem(this.key) || 'null') } catch { return null } }
   persist() { this.save({ runId: this.state.run?.id, pendingRequest: this.state.pendingRequest, requestFailure: this.state.requestFailure }) }
@@ -96,7 +101,7 @@ export class RunnerController {
       if (run) this.validateRun(run)
       state.recoveryNeeded = false
       this.recoveryAttempts = 0
-      state.error = ''; state.apiConnected = true; state.lastContact = Date.now()
+      state.error = state.startRejection || ''; state.apiConnected = true; state.lastContact = Date.now()
       if (run) { this.applyDiscoveredRun(run, actionEpoch); this.beginPolling(id) }
       else { state.status = state.requestFailure ? 'failed' : 'ready'; this.persist() }
     } catch (error) {
@@ -151,7 +156,7 @@ export class RunnerController {
     const id = this.generation
     this.poller?.stop()
     this.clearRecoveryTimer()
-    state.starting = true; state.error = ''; state.logs = []; state.steps = {}; state.cursor = 0
+    state.starting = true; state.error = ''; state.startRejection = ''; state.logs = []; state.steps = {}; state.cursor = 0
     state.run = null; state.prompt = null; state.requestFailure = null
     const request = { scenario_id: scenario.id, definition_version: scenario.version, definition_hash: scenario.definition_hash,
       target: state.target, request_id: crypto.randomUUID() }
@@ -178,6 +183,7 @@ export class RunnerController {
       // A received 4xx is a definite rejection; network/5xx may hide an accepted start.
       const code = error?.response?.status
       if (code >= 400 && code < 500 && code !== 408) {
+        state.startRejection = state.error
         state.pendingRequest = null
         this.persist()
         state.status = 'ready'

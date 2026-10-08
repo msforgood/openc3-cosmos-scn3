@@ -9,7 +9,7 @@ class InstalledReleaseTest < Minitest::Test
   class Backend
     attr_accessor :names, :bodies, :plugins
     def initialize
-      @names = Scenario::InstalledRelease::NAMES.map { |name| "#{name}-1.0.4.gem__0" }
+      @names = Scenario::InstalledRelease::NAMES.map { |name| "#{name}-1.0.14.gem__0" }
       @plugins = Scenario::InstalledRelease::NAMES.zip(@names).to_h
       @bodies = {}
     end
@@ -23,7 +23,7 @@ class InstalledReleaseTest < Minitest::Test
     @backend = Backend.new
     @gem_home = File.join(@directory, 'gems')
     @catalog = File.join(@directory, 'scenarios.json')
-    @record = { 'schema' => 1, 'version' => '1.0.4', 'core_version' => '6.10.1', 'scope' => 'DEFAULT',
+    @record = { 'schema' => 1, 'version' => '1.0.14', 'core_version' => '6.10.1', 'scope' => 'DEFAULT',
                 'manifest_sha256' => 'a' * 64, 'ui_sha256' => Digest::SHA256.hexdigest('fixture'),
                 'gems' => Scenario::InstalledRelease::NAMES.to_h { |name| [name, 'b' * 64] } }
     Scenario::InstalledRelease::FILES.each do |key, (local, remote)|
@@ -31,17 +31,17 @@ class InstalledReleaseTest < Minitest::Test
       File.write(File.join(@directory, local), body)
       @record[key] = Digest::SHA256.hexdigest(body)
       @backend.bodies[remote] = body
-      installed = File.join(@gem_home, 'gems', 'openc3-cosmos-cfs-scenario-runner-1.0.4', 'targets', remote)
+      installed = File.join(@gem_home, 'gems', 'openc3-cosmos-cfs-scenario-runner-1.0.14', 'targets', remote)
       FileUtils.mkdir_p(File.dirname(installed))
       File.write(installed, body)
     end
-    ui = File.join(@gem_home, 'gems', 'openc3-cosmos-tool-scenariorunner-1.0.4', 'tools/scenariorunner/main.js')
+    ui = File.join(@gem_home, 'gems', 'openc3-cosmos-tool-scenariorunner-1.0.14', 'tools/scenariorunner/main.js')
     FileUtils.mkdir_p(File.dirname(ui))
     File.write(ui, 'fixture')
     @ready = File.join(@directory, 'scenario-installed.json')
     write_record
     @original_version = ENV['SCENARIO_VERSION']
-    ENV['SCENARIO_VERSION'] = '1.0.4'
+    ENV['SCENARIO_VERSION'] = '1.0.14'
   end
 
   def teardown
@@ -73,7 +73,7 @@ class InstalledReleaseTest < Minitest::Test
   end
 
   def test_mixed_release_core_scope_or_hash_refuses_startup
-    { 'version' => '1.0.3', 'core_version' => '6.9.0', 'scope' => 'OTHER', 'catalog_sha256' => 'c' * 64,
+    { 'version' => '1.0.8', 'core_version' => '6.9.0', 'scope' => 'OTHER', 'catalog_sha256' => 'c' * 64,
       'policy_sha256' => 'c' * 64, 'procedure_sha256' => 'c' * 64 }.each do |key, value|
       original = @record[key]
       @record[key] = value
@@ -84,8 +84,8 @@ class InstalledReleaseTest < Minitest::Test
   end
 
   def test_runtime_version_override_cannot_bless_mixed_images
-    ENV['SCENARIO_VERSION'] = '1.0.3'
-    @record['version'] = '1.0.3'
+    ENV['SCENARIO_VERSION'] = '1.0.8'
+    @record['version'] = '1.0.8'
     write_record
     assert_raises(Scenario::InstalledRelease::Failure) { verify }
   end
@@ -111,7 +111,7 @@ class InstalledReleaseTest < Minitest::Test
   end
 
   def test_local_installed_procedure_mismatch_refuses_startup
-    path = File.join(@gem_home, 'gems/openc3-cosmos-cfs-scenario-runner-1.0.4/targets/SCENARIO_RUNNER/procedures/run_scenario.py')
+    path = File.join(@gem_home, 'gems/openc3-cosmos-cfs-scenario-runner-1.0.14/targets/SCENARIO_RUNNER/procedures/run_scenario.py')
     File.write(path, 'modified')
     assert_raises(Scenario::InstalledRelease::Failure) { verify }
   end

@@ -31,11 +31,18 @@
             </li>
           </ol>
         </div>
-        <div v-if="recoveredKey" class="scenario-preview" data-test="recovered-key">
+        <div v-if="isCrcScenario" class="scenario-preview" data-test="xband-evidence">
           <strong>Recovered X-band lab key</strong>
-          <p><code>{{ recoveredKey }}</code></p>
-          <p class="muted small">16 one-byte CRC responses reconstructed this key. Use the isolated channel verifier to confirm it.</p>
+          <p v-if="recoveredKey" data-test="recovered-key"><code>{{ recoveredKey }}</code></p>
+          <p v-else class="muted small">Run this scenario to recover the key from 16 CS CRC responses.</p>
+          <div v-if="verifiedFrame" data-test="decrypted-flag">
+            <strong>X-band frame {{ verifiedFrame.sequence }} · AES-GCM authenticated</strong>
+            <p>Decrypted flag: <code>{{ verifiedFrame.flag }}</code></p>
+          </div>
+          <p v-else class="muted small">Decrypted flag will appear after a fresh X-band frame is authenticated.</p>
         </div>
+        <TcLogEvidence v-if="isTcLogScenario" :steps="displaySteps" />
+        <PspEvidence v-if="isPspScenario" :steps="displaySteps" />
         <div class="run-progress"><label for="run-progress">{{ completedSteps }} / {{ selectedScenario?.steps.length || 0 }} steps complete</label>
           <progress id="run-progress" :value="completedSteps" :max="selectedScenario?.steps.length || 1" />
           <div class="time-row"><span>Elapsed {{ matchesRun ? elapsed : 0 }}s</span><span v-if="matchesRun && state.run?.deadline">Deadline {{ formatTime(state.run.deadline) }}</span></div>
@@ -79,6 +86,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { OpenC3Api } from '@openc3/js-common/services'
 import { TopBar } from '@openc3/vue-common/components'
 import TelemetryPanel from './TelemetryPanel.vue'
+import TcLogEvidence from './TcLogEvidence.vue'
+import PspEvidence from './PspEvidence.vue'
 import { createScenarioApi } from './scenarioApi.js'
 import { initialRunnerState, RunnerController, runMatchesScenario } from './runnerController.js'
 import { supportedTargets, formatTime, errorMessage, STORAGE_PREFIX } from './runtime.js'
@@ -102,7 +111,17 @@ const matchesRun = computed(() => runMatchesScenario(state.run, selectedScenario
 const displaySteps = computed(() => matchesRun.value ? state.steps : {})
 const displayStatus = computed(() => state.run && !matchesRun.value && !locked.value ? 'ready' : state.status)
 const completedSteps = computed(() => selectedScenario.value?.steps.filter((step) => displaySteps.value[step.id]?.status === 'succeeded').length || 0)
+const isCrcScenario = computed(() => ['qemu-cs-crc-key-oracle', 'bbb-cs-crc-key-oracle'].includes(selectedScenario.value?.id))
 const recoveredKey = computed(() => matchesRun.value ? /^Recovered X-band lab key: ([0-9a-f]{32})$/.exec(state.run?.result?.message || '')?.[1] || '' : '')
+const verifiedFrame = computed(() => {
+  if (!recoveredKey.value || state.status !== 'succeeded') return null
+  const step = displaySteps.value['verify-xband-frame']
+  if (step?.status !== 'succeeded' || step.authenticated !== true) return null
+  const match = /^XBD1 frame ([1-9][0-9]*) AES-GCM authenticated; decrypted flag: (flag\{[a-z0-9_]{10}\})$/.exec(step.message || '')
+  return match ? { sequence: match[1], flag: match[2] } : null
+})
+const isTcLogScenario = computed(() => ['qemu-tc-log-photo-traversal', 'bbb-tc-log-photo-traversal'].includes(selectedScenario.value?.id))
+const isPspScenario = computed(() => ['qemu-psp-mm-indirect-write', 'bbb-psp-mm-indirect-write'].includes(selectedScenario.value?.id))
 const elapsed = computed(() => {
   if (!state.run) return 0
   const end = ['succeeded', 'failed', 'stopped'].includes(state.status) ? Date.parse(state.run.updated_at) : now.value
@@ -111,6 +130,7 @@ const elapsed = computed(() => {
 const promptRemaining = computed(() => Math.max(0, Math.ceil((Date.parse(state.prompt?.deadline) - now.value) / 1000)) || 0)
 watch(availableScenarios, (items) => { if (!items.some((s) => s.id === scenarioId.value)) scenarioId.value = items[0]?.id || '' })
 watch(() => state.run?.scenario_id, (id) => { if (id) scenarioId.value = id })
+watch(scenarioId, () => controller.clearStartRejection())
 async function selectTarget(target) {
   if (await controller.selectTarget(target) && !disposed) {
     try { localStorage.setItem(`${STORAGE_PREFIX}.${scope}.target`, target) } catch { /* optional preference */ }
@@ -149,6 +169,29 @@ function stepDescription(step) {
   if (step.type === 'waitTelemetry') return `Wait for ${step.packet}.${step.item} ${step.operator} ${step.value} · timeout ${step.timeoutSec}s`
   if (step.type === 'resolveAddress') return 'Read key location and channel status from XKEY_HK'
   if (step.type === 'crcByte') return `CS OneShot: offset ${step.offset}, size 1 · confirm fresh CS_HK and invert CRC`
+  if (step.type === 'verifyXbandFrame') return 'Receive a fresh X-band UDP frame and authenticate/decrypt it with the recovered key'
+  if (step.type === 'tcLogPhase') return ({
+    'seal-baseline': 'Close the previous onboard log and start a fresh file',
+    'record-normal': 'Send a housekeeping TC and save a normal photo',
+    'seal-target': 'Close the TC log chosen for the demonstration',
+    'read-before': 'Read the closed log through CI_LAB telemetry',
+    'overwrite-log': 'Save a photo named ../log/tcNNNN.log',
+    'read-after': 'Read the same path and verify the PNG signature',
+    'confirm-continuity': 'Confirm later commands are recorded in the next log',
+  })[step.phase] || step.phase
+  if (step.type === 'pspPhase') return ({
+    baseline: 'Read normal pulse and protected controller state',
+    map: 'MM finds the permitted app module and feed pointer slot',
+    'deny-direct-write': 'Verify MM rejects a direct write to controller mode',
+    pause: 'Pause periodic pulse writes',
+    'read-pointer': 'Read the four-byte feed pointer from the permitted app',
+    'write-pointer-byte': 'Change only the pointer low byte through MM/PSP',
+    'verify-pointer': 'Read back the pointer and confirm the mode address',
+    resume: 'Resume the pulse app and let its normal write use the new pointer',
+    'observe-fault': 'Observe controller mode fault and internal halt acknowledgement',
+    'confirm-es-exit': 'Confirm cFE ES event 14 for controller APP_ERROR cleanup',
+    'confirm-pulse': 'Confirm the pulse app remains alive in fault-halted state',
+  })[step.phase] || step.phase
   return step.type
 }
 function logMessage(event) {

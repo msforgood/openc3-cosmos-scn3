@@ -8,8 +8,9 @@ require 'net/http'
 require_relative 'bounded-process'
 
 module ScenarioBootstrap
-  RELEASE = '1.0.4'.freeze
+  RELEASE = '1.0.14'.freeze
   CORE_VERSION = '6.10.1'.freeze
+  SUPPORTED_UPGRADE_FROM = (8..13).map { |patch| "1.0.#{patch}" }.freeze
   NAMES = %w[openc3-cosmos-cfs-scenario-runner openc3-cosmos-tool-scenariorunner].freeze
   REQUIRED = {
     NAMES[0] => 'targets/SCENARIO_RUNNER/procedures/run_scenario.py',
@@ -214,8 +215,8 @@ module ScenarioBootstrap
     end
 
     def plan(installed)
-      if @upgrade_from && (@upgrade_from != '1.0.3' || @artifacts.version != RELEASE)
-        raise Failure, 'Only explicit SCENARIO_UPGRADE_FROM=1.0.3 to release 1.0.4 is supported; no downgrade is allowed'
+      if @upgrade_from && !SUPPORTED_UPGRADE_FROM.include?(@upgrade_from)
+        raise Failure, 'SCENARIO_UPGRADE_FROM must be a supported previous Scenario release'
       end
       if NAMES.all? { |name| matching(installed, name, @artifacts.version) }
         NAMES.each do |name|
@@ -225,10 +226,14 @@ module ScenarioBootstrap
       end
       existing = installed.select { |item| NAMES.any? { |name| item.start_with?("#{name}-") } }
       return :install if existing.empty? && !@upgrade_from
-      if @upgrade_from && NAMES.all? { |name| matching(installed, name, @upgrade_from) && @backend.complete?(name, @upgrade_from) }
-        return :upgrade
+      source = SUPPORTED_UPGRADE_FROM.find do |version|
+        NAMES.all? { |name| matching(installed, name, version) }
       end
-      raise Failure, 'Automatic version changes, duplicate instances, partial or incomplete releases are refused; maintenance upgrade requires exactly the complete expected source release'
+      if source
+        raise Failure, 'SCENARIO_UPGRADE_FROM does not match the installed Scenario release' if @upgrade_from && @upgrade_from != source
+        return :upgrade if NAMES.all? { |name| @backend.complete?(name, source) }
+      end
+      raise Failure, 'Unsupported version, duplicate instances, partial or incomplete Scenario release; installation refused'
     end
 
     def write_ready!

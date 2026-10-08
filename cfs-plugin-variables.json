@@ -1,0 +1,9 @@
+{
+  "cfs_eds_enabled": "false",
+  "cfs_mem_addr_size": "32",
+  "cfs_endianness": "LITTLE_ENDIAN",
+  "cfs_bbb_cmd_ip": "192.168.7.2",
+  "cfs_qemu_cmd_ip": "qemu-cfs",
+  "cfs_bbb_tlm_output_ip": "192.168.7.1",
+  "cfs_qemu_tlm_output_ip": "172.21.0.2"
+}

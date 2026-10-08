@@ -9,17 +9,32 @@ class OpenC3AdapterTest < ScenarioTest
     @policy = JSON.parse(File.read(File.expand_path('../config/safety_policy.json', __dir__)))
   end
 
-  def packet(_target, name, type:, scope:)
+  def packet(target, name, type:, scope:)
     assert_equal 'DEFAULT', scope
+    oracle = @policy.fetch('crcKeyOracle')
+    if name == oracle['xbandPacket']
+      assert_includes oracle.fetch('xbandTargets').values, target
+    else
+      assert_includes @policy.fetch('allowedTargets'), target
+    end
     if type == :CMD
-      defaults = @policy['headerDefaults'].merge('CCSDS_STREAMID' => @policy['commands'][name]['streamId'])
+      stream_id = name == oracle['command'] ? oracle['streamId'] : @policy['commands'].fetch(name)['streamId']
+      defaults = @policy['headerDefaults'].merge('CCSDS_STREAMID' => stream_id)
+      defaults['CCSDS_FC'] = oracle['functionCode'] if name == oracle['command']
       items = defaults.map { |key, value| { 'name' => key, 'default' => value, 'id_value' => value, 'data_type' => 'UINT' } }
+      items += %w[ADDRESS SIZE MAX_BYTES_PER_CYCLE].map { |key| { 'name' => key, 'data_type' => 'UINT', 'bit_size' => 32 } } if name == oracle['command']
       items += OpenC3::Packet::RESERVED_ITEM_NAMES.map { |key| { 'name' => key, 'data_type' => 'DERIVED' } }
     else
-      items = [{ 'name' => 'COMMAND_COUNTER', 'data_type' => 'UINT', 'bit_size' => 8 }]
+      items = name == oracle['xbandPacket'] ? [] : [{ 'name' => 'COMMAND_COUNTER', 'data_type' => 'UINT', 'bit_size' => 8 }]
+      items += @policy['telemetryTypes'].filter_map do |field, width|
+        { 'name' => field.split('.', 2)[1], 'data_type' => 'UINT', 'bit_size' => width } if field.start_with?("#{name}.")
+      end
+      if name == oracle['xbandPacket']
+        items.find { |item| item['name'] == 'MAGIC' }['id_value'] = oracle['xbandMagic']
+      end
       items += %w[RECEIVED_TIMESECONDS RECEIVED_COUNT].map { |key| { 'name' => key, 'data_type' => 'DERIVED' } }
     end
-    { 'target_name' => 'CFS-1_QEMU', 'packet_name' => name, 'items' => items }
+    { 'target_name' => target, 'packet_name' => name, 'items' => items }
   end
 
   def target_file(_scope, path)
@@ -35,6 +50,29 @@ class OpenC3AdapterTest < ScenarioTest
       OpenC3::TargetFile.stub(:body, method(:target_file)) do
         assert @adapter.validate_definition!('DEFAULT', 'CFS-1_QEMU', @catalog.definitions.first)
       end
+    end
+  end
+
+  def test_bbb_crc_oracle_validates_independent_xband_target_before_launch
+    definition = @catalog.get('bbb-cs-crc-key-oracle')
+    OpenC3::TargetModel.stub(:packet, method(:packet)) do
+      OpenC3::TargetFile.stub(:body, method(:target_file)) do
+        assert @adapter.validate_definition!('DEFAULT', 'CFS-1_BBB', definition)
+      end
+    end
+  end
+
+  def test_wrong_crc_function_code_is_rejected_before_launch
+    definition = @catalog.get('qemu-cs-crc-key-oracle')
+    changed = lambda do |target, name, **args|
+      value = packet(target, name, **args)
+      if name == @policy.dig('crcKeyOracle', 'command') && args[:type] == :CMD
+        value.fetch('items').find { |item| item['name'] == 'CCSDS_FC' }['default'] = 0
+      end
+      value
+    end
+    OpenC3::TargetModel.stub(:packet, changed) do
+      assert_error('command_header_mismatch') { @adapter.validate_definition!('DEFAULT', 'CFS-1_QEMU', definition) }
     end
   end
 
