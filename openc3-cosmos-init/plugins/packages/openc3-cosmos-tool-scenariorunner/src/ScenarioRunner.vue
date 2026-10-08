@@ -31,10 +31,15 @@
             </li>
           </ol>
         </div>
-        <div v-if="isCrcScenario && matchesRun" class="scenario-preview" data-test="xband-evidence">
-          <strong>X-band frame verification</strong>
-          <p>{{ displaySteps['verify-xband-frame']?.message || 'Waiting for a fresh encrypted frame after the 16 CRC probes.' }}</p>
-          <p class="muted small">The recovered key stays inside the running procedure and is not stored in the run result.</p>
+        <div v-if="isCrcScenario" class="scenario-preview" data-test="xband-evidence">
+          <strong>Recovered X-band lab key</strong>
+          <p v-if="recoveredKey" data-test="recovered-key"><code>{{ recoveredKey }}</code></p>
+          <p v-else class="muted small">Run this scenario to recover the key from 16 CS CRC responses.</p>
+          <div v-if="verifiedFrame" data-test="decrypted-flag">
+            <strong>X-band frame {{ verifiedFrame.sequence }} · AES-GCM authenticated</strong>
+            <p>Decrypted flag: <code>{{ verifiedFrame.flag }}</code></p>
+          </div>
+          <p v-else class="muted small">Decrypted flag will appear after a fresh X-band frame is authenticated.</p>
         </div>
         <TcLogEvidence v-if="isTcLogScenario" :steps="displaySteps" />
         <PspEvidence v-if="isPspScenario" :steps="displaySteps" />
@@ -107,6 +112,14 @@ const displaySteps = computed(() => matchesRun.value ? state.steps : {})
 const displayStatus = computed(() => state.run && !matchesRun.value && !locked.value ? 'ready' : state.status)
 const completedSteps = computed(() => selectedScenario.value?.steps.filter((step) => displaySteps.value[step.id]?.status === 'succeeded').length || 0)
 const isCrcScenario = computed(() => ['qemu-cs-crc-key-oracle', 'bbb-cs-crc-key-oracle'].includes(selectedScenario.value?.id))
+const recoveredKey = computed(() => matchesRun.value ? /^Recovered X-band lab key: ([0-9a-f]{32})$/.exec(state.run?.result?.message || '')?.[1] || '' : '')
+const verifiedFrame = computed(() => {
+  if (!recoveredKey.value || state.status !== 'succeeded') return null
+  const step = displaySteps.value['verify-xband-frame']
+  if (step?.status !== 'succeeded' || step.authenticated !== true) return null
+  const match = /^XBD1 frame ([1-9][0-9]*) AES-GCM authenticated; decrypted flag: (flag\{[a-z0-9_]{10}\})$/.exec(step.message || '')
+  return match ? { sequence: match[1], flag: match[2] } : null
+})
 const isTcLogScenario = computed(() => ['qemu-tc-log-photo-traversal', 'bbb-tc-log-photo-traversal'].includes(selectedScenario.value?.id))
 const isPspScenario = computed(() => ['qemu-psp-mm-indirect-write', 'bbb-psp-mm-indirect-write'].includes(selectedScenario.value?.id))
 const elapsed = computed(() => {

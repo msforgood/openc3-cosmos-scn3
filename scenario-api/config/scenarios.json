@@ -415,9 +415,9 @@
   {
     "schemaVersion": 1,
     "id": "qemu-cs-crc-key-oracle",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "name": "CS one-byte CRC key recovery",
-    "description": "Recover the X-band lab key with 16 one-byte CS CRC requests, then authenticate and decrypt a new encrypted X-band UDP telemetry frame.",
+    "description": "Recover the X-band lab key with 16 one-byte CS CRC requests, then authenticate a fresh X-band frame and reveal its encrypted lab flag.",
     "supportedTargets": [
       "CFS-1_QEMU"
     ],
@@ -630,9 +630,9 @@
   {
     "schemaVersion": 1,
     "id": "bbb-cs-crc-key-oracle",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "name": "BBB CS one-byte CRC key recovery",
-    "description": "Recover the BBB X-band lab key with 16 one-byte CS CRC requests, then authenticate and decrypt a new encrypted X-band UDP telemetry frame.",
+    "description": "Recover the BBB X-band lab key with 16 one-byte CS CRC requests, then authenticate a fresh X-band frame and reveal its encrypted lab flag.",
     "supportedTargets": [
       "CFS-1_BBB"
     ],

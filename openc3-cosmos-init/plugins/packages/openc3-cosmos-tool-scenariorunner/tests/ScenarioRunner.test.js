@@ -53,6 +53,37 @@ it('renders recovered absence as Failed and enables Start without pretending an 
   expect(wrapper.get('[data-test="stop"]').element.disabled).toBe(true)
 })
 
+it('shows the X-band result area when the CRC scenario is selected', async () => {
+  mocks.api.scenarios.mockResolvedValue({ items: [{ id: 'qemu-cs-crc-key-oracle', version: '1.0.1',
+    definition_hash: 'oracle', name: 'Key recovery', supportedTargets: ['A'], telemetryItems: [],
+    steps: [{ id: 'verify-xband-frame', type: 'verifyXbandFrame' }] }] })
+  await render()
+  expect(wrapper.get('[data-test="xband-evidence"]').text()).toContain('Run this scenario to recover the key')
+  expect(wrapper.find('[data-test="recovered-key"]').exists()).toBe(false)
+  expect(wrapper.find('[data-test="decrypted-flag"]').exists()).toBe(false)
+})
+
+it('shows the recovered key and authenticated decrypted flag for a completed CRC run', async () => {
+  const key = '2c9a017e54e3b860114dfa820c9735d6'
+  const scenario = { id: 'qemu-cs-crc-key-oracle', version: '1.0.1', definition_hash: 'oracle',
+    name: 'Key recovery', supportedTargets: ['A'], telemetryItems: [],
+    steps: [{ id: 'verify-xband-frame', type: 'verifyXbandFrame' }] }
+  const complete = { ...active, scenario_id: scenario.id, definition_version: scenario.version,
+    definition_hash: scenario.definition_hash, state: 'succeeded', updated_at: '2026-09-27T00:01:00Z',
+    result: { status: 'succeeded', message: `Recovered X-band lab key: ${key}` } }
+  localStorage.setItem(`${STORAGE_PREFIX}.DEFAULT.run.A`, JSON.stringify({ runId: complete.id }))
+  mocks.api.run.mockResolvedValue(complete)
+  mocks.api.scenarios.mockResolvedValue({ items: [scenario] })
+  mocks.api.events.mockResolvedValue({ items: [{ id: 1, type: 'step', data: {
+    step_id: 'verify-xband-frame', status: 'succeeded', authenticated: true,
+    message: 'XBD1 frame 42 AES-GCM authenticated; decrypted flag: flag{crc_oracle}',
+  } }], next_cursor: 1 })
+  await render()
+  expect(wrapper.get('[data-test="recovered-key"]').text()).toContain(key)
+  expect(wrapper.get('[data-test="decrypted-flag"]').text()).toContain('flag{crc_oracle}')
+  expect(wrapper.get('[data-test="decrypted-flag"]').text()).toContain('frame 42 · AES-GCM authenticated')
+})
+
 it('shows a confirmed failed request while offline discovery keeps Start locked and cleans up retries on unmount', async () => {
   mocks.api.runs.mockRejectedValue(new Error('offline'))
   await render()

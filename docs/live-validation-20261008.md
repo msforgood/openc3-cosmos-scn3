@@ -65,7 +65,8 @@ log or photo was removed.
 
 The successful X-band steps authenticated a fresh AES-GCM frame and
 decrypted `flag{crc_oracle}` on both targets. The recovered per-start keys
-are in the restricted lab run results and are intentionally omitted here.
+are in the restricted lab run results and are intentionally omitted from
+this document; Runner 1.0.14 displays them in the result UI.
 The 1.0.14 UI component tests cover key and flag rendering; a separate
 browser automation check was blocked by the browser tool's URL policy, so
 the post-upgrade page was verified by HTTP/API response rather than a visual

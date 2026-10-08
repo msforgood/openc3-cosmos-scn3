@@ -1,6 +1,6 @@
 # CFS Scenario Runner procedure plugin
 
-Independent `openc3-cosmos-cfs-scenario-runner` **1.0.13**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image builds and installs it together with the Scenario UI.
+Independent `openc3-cosmos-cfs-scenario-runner` **1.0.14**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image builds and installs it together with the Scenario UI.
 
 This integration release includes all three cFS demonstrations on QEMU and BBB, plus the two housekeeping checks. The PSP indirect-write procedure subscribes to the EVS packet stream before resuming the pulse app, so a later EVS event cannot erase the cFE ES exit confirmation from the latest-value cache.
 

@@ -261,7 +261,7 @@ require(len(CRC_BYTE_LOOKUP) == 256, "crc_oracle_not_injective")
 
 
 def decode_xband_frame(key, values):
-    """Authenticate one 48-byte XBD1 frame and decode its synthetic telemetry."""
+    """Authenticate one 48-byte XBD1 frame and recover its lab flag."""
     require(type(key) in (bytes, bytearray) and len(key) == ORACLE["keyBytes"], "invalid_oracle_state")
     require(type(values) is dict and set(values) == set(XBAND_FIELDS), "xband_frame_invalid")
     for field in XBAND_FIELDS:
@@ -282,17 +282,9 @@ def decode_xband_frame(key, values):
     except InvalidTag:
         raise ScenarioError("xband_auth_failed") from None
     require(len(plaintext) == 16, "xband_payload_invalid")
-    sequence = int.from_bytes(plaintext[0:4], "big")
-    seconds = int.from_bytes(plaintext[4:8], "big")
-    temperature = int.from_bytes(plaintext[8:10], "big")
-    voltage = int.from_bytes(plaintext[10:12], "big")
-    status = int.from_bytes(plaintext[12:16], "big")
-    require(sequence == (values["COUNTER"] & 0xffffffff) and
-            temperature == 2150 + values["COUNTER"] % 11 and
-            voltage == 7400 + values["COUNTER"] % 17 and status == 3,
+    require(re.fullmatch(rb"flag\{[a-z0-9_]{10}\}", plaintext) is not None,
             "xband_payload_invalid")
-    return {"sequence": sequence, "cfe_seconds": seconds, "temperature_centi_c": temperature,
-            "bus_voltage_mv": voltage, "status_flags": status}
+    return {"sequence": values["COUNTER"], "flag": plaintext.decode("ascii")}
 
 
 class OpenC3Adapter:
@@ -753,9 +745,8 @@ class ScenarioRunner:
                 return {"packet": packet, "item": "COUNTER", "value": sample.values["COUNTER"],
                         "received_at": datetime.fromtimestamp(sample.received, timezone.utc).isoformat(),
                         "telemetryConfirmed": True, "authenticated": True,
-                        "message": (f"XBD1 frame {decoded['sequence']} authenticated and decrypted: "
-                                    f"temperature {decoded['temperature_centi_c'] / 100:.2f} C, "
-                                    f"bus {decoded['bus_voltage_mv']} mV, status 0x{decoded['status_flags']:08x}")}
+                        "message": (f"XBD1 frame {decoded['sequence']} AES-GCM authenticated; "
+                                    f"decrypted flag: {decoded['flag']}")}
             remaining = end - self.monotonic()
             if remaining > 0:
                 self.sleep(min(step["pollIntervalSec"], remaining, self._remaining()))
@@ -1181,7 +1172,7 @@ class ScenarioRunner:
             if hasattr(self, "recovered"):
                 require(len(self.recovered) == ORACLE["keyBytes"] and
                         getattr(self, "xband_verified", False), "incomplete_key")
-                message = "Recovered 16-byte X-band lab key and decrypted an authenticated XBD1 telemetry frame"
+                message = f"Recovered X-band lab key: {bytes(self.recovered).hex()}"
             elif hasattr(self, "tc_target_index"):
                 message = f"Onboard TC log tc{self.tc_target_index:04d}.log replaced by the demo photo"
             elif hasattr(self, "psp_pointer_before"):

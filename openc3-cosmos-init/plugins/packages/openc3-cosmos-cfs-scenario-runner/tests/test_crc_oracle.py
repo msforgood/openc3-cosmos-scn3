@@ -140,8 +140,7 @@ class OracleTests(unittest.TestCase):
                 self.clock = Clock()
                 engine, adapter, management = self.engine(scenario_id=scenario_id)
                 with patch.object(runner, "decode_xband_frame", return_value={
-                    "sequence": 1, "cfe_seconds": 2, "temperature_centi_c": 2151,
-                    "bus_voltage_mv": 7401, "status_flags": 3}) as decode:
+                    "sequence": 1, "flag": "flag{crc_oracle}"}) as decode:
                     self.assertEqual(engine.run()["status"], "succeeded")
                     self.assertEqual(decode.call_args.args[0], KEY)
                 self.assertEqual(adapter.sent_targets, [target] * 16)
@@ -150,8 +149,11 @@ class OracleTests(unittest.TestCase):
                 self.assertTrue(all(command["SIZE"] == command["MAX_BYTES_PER_CYCLE"] == 1
                                     for command in adapter.sent))
                 self.assertEqual(management.events[-1][1]["message"],
-                                 "Recovered 16-byte X-band lab key and decrypted an authenticated XBD1 telemetry frame")
-                self.assertNotIn(KEY.hex(), str(management.events))
+                                 f"Recovered X-band lab key: {KEY.hex()}")
+                verified = [data for kind, data in management.events if kind == "step" and
+                            data.get("step_id") == "verify-xband-frame" and data.get("status") == "succeeded"]
+                self.assertEqual(verified[0]["authenticated"], True)
+                self.assertIn("decrypted flag: flag{crc_oracle}", verified[0]["message"])
 
     def test_oracle_scenario_cannot_switch_target(self):
         engine, adapter, management = self.engine()
@@ -183,8 +185,7 @@ class OracleTests(unittest.TestCase):
     def test_new_hk_with_old_same_address_crc_waits_for_command_counter(self):
         engine, adapter, _ = self.engine(old_receipt_once=True)
         with patch.object(runner, "decode_xband_frame", return_value={
-            "sequence": 1, "cfe_seconds": 2, "temperature_centi_c": 2151,
-            "bus_voltage_mv": 7401, "status_flags": 3}):
+            "sequence": 1, "flag": "flag{crc_oracle}"}):
             self.assertEqual(engine.run()["status"], "succeeded")
         self.assertEqual(len(adapter.sent), 16)
         self.assertGreaterEqual(adapter.polls_after_send, 2)
@@ -206,10 +207,7 @@ class OracleTests(unittest.TestCase):
         counter = 7
         iv = b"\x11\x22\x33\x44" + counter.to_bytes(8, "big")
         header = b"XBD1" + iv
-        plaintext = (counter.to_bytes(4, "big") + (1234).to_bytes(4, "big") +
-                     (2150 + counter % 11).to_bytes(2, "big") +
-                     (7400 + counter % 17).to_bytes(2, "big") +
-                     (3).to_bytes(4, "big"))
+        plaintext = b"flag{crc_oracle}"
         encrypted = AESGCM(KEY).encrypt(iv, plaintext, header)
         frame = header + encrypted
         values = {"MAGIC": int.from_bytes(frame[0:4], "big"),
@@ -221,7 +219,7 @@ class OracleTests(unittest.TestCase):
                     frame[start + index * 4:start + (index + 1) * 4], "big")
         decoded = runner.decode_xband_frame(KEY, values)
         self.assertEqual(decoded["sequence"], counter)
-        self.assertEqual(decoded["bus_voltage_mv"], 7407)
+        self.assertEqual(decoded["flag"], "flag{crc_oracle}")
         wrong = bytearray(KEY)
         wrong[0] ^= 1
         with self.assertRaisesRegex(runner.ScenarioError, "xband_auth_failed"):
