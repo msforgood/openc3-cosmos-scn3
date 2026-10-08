@@ -55,3 +55,21 @@ Verify `openc3-cosmos-init` exited 0, `scenario-api` is healthy,
 `/scenario-api/scenarios` returns eight definitions, and the Scenario
 Runner selector lists the corresponding QEMU/BBB procedures. Run the
 appropriate target only after its TC/TM and X-band interfaces are receiving.
+
+## This workspace's Compose entry point
+
+`open_c3/openc3-cosmos-scn3/compose.override.yaml` forwards the original
+checkout's init/API builds and plugin mounts to this integration checkout.
+Run `docker compose up -d` from that original directory, as usual. The
+expected init status after startup is `Exited (0)`; the API should be
+`healthy`. Keep the override in place while using the all-scenario catalog.
+
+If BBB commands reach the board but its telemetry screen stops updating,
+check `CFS-1_BBB_INTF` receive count before changing the flight software.
+On 2026-10-08, BBB was sending UDP packets to `192.168.7.1:1235` and the
+operator interface remained connected with receive count zero. Recreating
+only the operator with
+`docker compose up -d --force-recreate --no-deps openc3-operator` restored
+its receive count and live BBB telemetry; QEMU telemetry also remained live.
+This observation localizes the interruption to the host/operator UDP ingress
+path, but does not identify a single internal Docker cause.
