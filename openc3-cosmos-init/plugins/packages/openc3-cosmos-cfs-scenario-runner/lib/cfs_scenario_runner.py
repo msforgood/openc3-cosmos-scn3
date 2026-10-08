@@ -347,6 +347,12 @@ class OpenC3Adapter:
         return PacketSample(dict(zip(fields, (row[0] for row in rows))), count, received,
                             any(row[1] == "STALE" for row in rows))
 
+    def subscribe_packets(self, target, packet):
+        return self.api.subscribe_packets([[target, packet]], scope=self.scope)
+
+    def get_packets(self, cursor):
+        return self.api.get_packets(cursor, count=256, scope=self.scope)
+
 
 class ManagementClient:
     """Authenticated context/callback HTTP with no transport logging or retries."""
@@ -1058,10 +1064,11 @@ class ScenarioRunner:
                     "message": f"Pulse pointer now targets controller mode 0x{self.psp_mode:08x}",
                     "commandAccepted": True, "telemetryConfirmed": True}
         if phase == "resume":
-            event_fields = ("PACKET_ID_APP_NAME", "PACKET_ID_EVENT_ID", "MESSAGE")
-            self.psp_es_baseline = self._call(
-                lambda: self.adapter.sample_fields(self.target, PSP["eventPacket"], event_fields),
-                "baseline")
+            self.psp_es_cursor = self._call(
+                lambda: self.adapter.subscribe_packets(self.target, PSP["eventPacket"]),
+                "event_subscription")
+            require(type(self.psp_es_cursor) is str and 0 < len(self.psp_es_cursor) <= 1024,
+                    "event_subscription_invalid")
             values = self._psp_pulse("PAYLOAD_PULSE_RESUME_CMD",
                                       lambda v: v.get("LAST_ACTION") in (4, 5) and
                                       v.get("STATE") in (1, 3)).values
@@ -1093,23 +1100,32 @@ class ScenarioRunner:
                 self.sleep(min(0.25, end - self.monotonic(), self._remaining()))
             raise ScenarioError("controller_fault_unconfirmed")
         if phase == "confirm-es-exit":
-            require(hasattr(self, "psp_es_baseline"), "invalid_psp_state")
-            fields = ("PACKET_ID_APP_NAME", "PACKET_ID_EVENT_ID", "MESSAGE")
+            require(hasattr(self, "psp_es_cursor"), "invalid_psp_state")
             end = min(self.deadline, self.monotonic() + 15)
             for _ in range(61):
                 self._check_stop()
-                sample = self._call(lambda: self.adapter.sample_fields(self.target, PSP["eventPacket"], fields),
-                                    "telemetry")
-                event = sample.values
-                app = event.get("PACKET_ID_APP_NAME")
-                message = event.get("MESSAGE")
-                if (not sample.stale and sample.count > self.psp_es_baseline.count and
-                        event.get("PACKET_ID_EVENT_ID") == PSP["esExitEventId"] and
-                        type(app) is str and app.rstrip("\x00") == "CFE_ES" and
-                        type(message) is str and "PAYLOAD_CTRL_APP" in message):
-                    return {"es_event_id": PSP["esExitEventId"], "es_event_message": message.rstrip("\x00"),
-                            "message": "cFE ES confirmed PAYLOAD_CTRL_APP APP_ERROR cleanup event 14",
-                            "telemetryConfirmed": True}
+                response = self._call(lambda: self.adapter.get_packets(self.psp_es_cursor), "telemetry")
+                require(type(response) in (list, tuple) and len(response) == 2,
+                        "invalid_event_stream")
+                cursor, packets = response
+                require(type(cursor) is str and 0 < len(cursor) <= 1024 and
+                        type(packets) is list and len(packets) <= 256,
+                        "invalid_event_stream")
+                self.psp_es_cursor = cursor
+                for event in packets:
+                    require(type(event) is dict, "invalid_event_stream")
+                    app = event.get("PACKET_ID_APP_NAME")
+                    message = event.get("MESSAGE")
+                    if (event.get("target_name") == self.target and
+                            event.get("packet_name") == PSP["eventPacket"] and
+                            event.get("PACKET_ID_EVENT_ID") == PSP["esExitEventId"] and
+                            type(app) is str and app.rstrip("\x00") == "CFE_ES" and
+                            type(message) is str and
+                            message.rstrip("\x00") == "Exit Application PAYLOAD_CTRL_APP Completed."):
+                        return {"es_event_id": PSP["esExitEventId"],
+                                "es_event_message": message.rstrip("\x00"),
+                                "message": "cFE ES confirmed PAYLOAD_CTRL_APP APP_ERROR cleanup event 14",
+                                "telemetryConfirmed": True}
                 if self.monotonic() >= end:
                     break
                 self.sleep(min(0.25, end - self.monotonic(), self._remaining()))

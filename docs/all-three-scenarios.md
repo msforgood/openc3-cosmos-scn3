@@ -1,4 +1,4 @@
-# Scenario Runner 1.0.12: three cFS demonstrations
+# Scenario Runner 1.0.13: three cFS demonstrations
 
 This checkout contains one Scenario Runner catalog for both `CFS-1_QEMU` and
 `CFS-1_BBB`: CS CRC/X-band (18 steps), TC log/photo traversal (7 steps),
@@ -15,7 +15,7 @@ not key bytes.
 
 Use this integration checkout and its `compose.yaml` as the source for the
 `openc3-cosmos-scn3` Compose project. Its init and API images, procedure/UI
-gems, and installed-release check are pinned to **1.0.12**. The older
+gems, and installed-release check are pinned to **1.0.13**. The older
 `open_c3/openc3-cosmos-scn3` checkout still has 1.0.8 source; starting that
 checkout without the project forwarding configuration would attempt an older
 init image.
@@ -28,17 +28,17 @@ UDP 4323 inside the Docker network. The unified cFS target plugin must have
 both `CFS-1_BBB_XBAND` and `CFS-1_QEMU_XBAND` installed, and each flight
 target must run the integrated CS/XKEY/TC_CAMERA/MM/payload app set.
 
-For an existing 1.0.11 installation, perform a guarded upgrade:
+For an existing 1.0.12 installation, perform a guarded upgrade:
 
 1. Confirm that Scenario Runner and OpenC3 Script Runner have no active runs.
    Preserve a consistent backup of the `scenario-data` volume and the
-   installed 1.0.11 init/API images and Scenario gems.
+   installed 1.0.12 init/API images and Scenario gems.
 2. From this checkout, build both matching images with the same project name:
    `docker compose -p openc3-cosmos-scn3 build openc3-cosmos-init scenario-api`.
 3. Stop the old API:
    `docker compose -p openc3-cosmos-scn3 stop scenario-api`.
 4. Run the one-time installer:
-   `docker compose -p openc3-cosmos-scn3 run --rm --no-deps -e SCENARIO_UPGRADE_FROM=1.0.11 openc3-cosmos-init`.
+   `docker compose -p openc3-cosmos-scn3 run --rm --no-deps -e SCENARIO_UPGRADE_FROM=1.0.12 openc3-cosmos-init`.
    Proceed only after it exits 0. The installer verifies the old two-gem
    release, database schema and idle state, Script Runner idle state, new
    package manifest, catalog, policy, procedure, and UI hashes.

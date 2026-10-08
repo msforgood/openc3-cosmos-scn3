@@ -6,7 +6,7 @@
 
 Gem::Specification.new do |s|
   s.name = 'openc3-cosmos-tool-scenariorunner'
-  s.version = ENV.fetch('VERSION', '1.0.12')
+  s.version = ENV.fetch('VERSION', '1.0.13')
   s.summary = 'OpenC3 COSMOS Scenario Runner Tool'
   s.description = 'Independent fixed-scenario runner with selected-target telemetry and read-only limits events for OpenC3 6.10.1.'
   s.authors = ['Scenario Runner contributors']

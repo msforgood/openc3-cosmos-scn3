@@ -44,11 +44,17 @@ class Adapter:
     MODE = 0x1200FF
     SLOT = 0x300080
 
-    def __init__(self, clock, *, direct_denied=True):
+    def __init__(self, clock, *, direct_denied=True, bury_es_exit=False, publish_es_exit=True,
+                 event_burst_before_exit=0):
         self.clock = clock
         self.direct_denied = direct_denied
+        self.bury_es_exit = bury_es_exit
+        self.publish_es_exit = publish_es_exit
+        self.event_burst_before_exit = event_burst_before_exit
         self.sent = []
         self.samples = {}
+        self.event_stream = []
+        self.subscribed_before_resume = False
         self.pointer = self.KICK
         self.pulse_count = 10
         self.pulse_state = 1
@@ -105,9 +111,21 @@ class Adapter:
         return runner.PacketSample({name: sample.values.get(name) for name in fields},
                                    sample.count, sample.received, sample.stale)
 
+    def subscribe_packets(self, target, packet):
+        self.event_target = target
+        self.subscribed_before_resume = not any(name == "PAYLOAD_PULSE_RESUME_CMD" for name, _ in self.sent)
+        return str(len(self.event_stream))
+
+    def get_packets(self, cursor):
+        start = int(cursor)
+        packets = self.event_stream[start:start + 256]
+        return str(start + len(packets)), packets
+
     def _publish(self, packet, values):
         previous = self.samples.get(packet)
         self.samples[packet] = runner.PacketSample(values, (previous.count if previous else 0) + 1, self.clock.now)
+        if packet == "CFE_EVS_LONG_EVENT_MSG":
+            self.event_stream.append({"target_name": self.event_target, "packet_name": packet, **values})
 
     def command(self, target, packet, parameters, timeout):
         self.sent.append((packet, parameters))
@@ -119,9 +137,18 @@ class Adapter:
             self.pulse_count += 1
             self.mode, self.fault, self.acked = 0xA5, 1, 1
             self._publish("PAYLOAD_CTRL_STATE", self._ctrl_values())
-            self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "CFE_ES",
-                                                      "PACKET_ID_EVENT_ID": 14,
-                                                      "MESSAGE": "Exit Application PAYLOAD_CTRL_APP Completed."})
+            for _ in range(self.event_burst_before_exit):
+                self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "PAYLOAD_PULSE_APP",
+                                                          "PACKET_ID_EVENT_ID": 3,
+                                                          "MESSAGE": "Pulse event before controller exit"})
+            if self.publish_es_exit:
+                self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "CFE_ES",
+                                                          "PACKET_ID_EVENT_ID": 14,
+                                                          "MESSAGE": "Exit Application PAYLOAD_CTRL_APP Completed."})
+            if self.bury_es_exit:
+                self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "PAYLOAD_PULSE_APP",
+                                                          "PACKET_ID_EVENT_ID": 3,
+                                                          "MESSAGE": "Pulse halted after controller fault"})
         if packet.startswith("PAYLOAD_PULSE_"):
             self._publish("PAYLOAD_PULSE_STATE", self._pulse_values())
         elif packet == "PAYLOAD_CTRL_STATUS_CMD":
@@ -188,6 +215,28 @@ class PspIndirectWriteTests(unittest.TestCase):
                 self.assertEqual(steps["observe-fault"]["halt_acked"], 1)
                 self.assertEqual(steps["confirm-es-exit"]["es_event_id"], 14)
                 self.assertEqual(steps["confirm-pulse"]["pulse_target"], Adapter.MODE)
+
+    def test_es_exit_survives_newer_evs_packet_replacing_latest_value(self):
+        engine, adapter, management = self.build(bury_es_exit=True)
+        self.assertEqual(engine.run(), {"status": "succeeded"})
+        self.assertTrue(adapter.subscribed_before_resume)
+        self.assertEqual(adapter.samples["CFE_EVS_LONG_EVENT_MSG"].values["PACKET_ID_EVENT_ID"], 3)
+        steps = {data["step_id"]: data for kind, data in management.events
+                 if kind == "step" and data["status"] == "succeeded"}
+        self.assertEqual(steps["confirm-es-exit"]["es_event_id"], 14)
+
+    def test_missing_es_exit_fails_closed(self):
+        engine, _adapter, _management = self.build(publish_es_exit=False, bury_es_exit=True)
+        with self.assertRaisesRegex(runner.ScenarioError, "es_app_error_unconfirmed"):
+            engine.run()
+
+    def test_es_exit_after_first_stream_batch(self):
+        engine, adapter, management = self.build(event_burst_before_exit=300)
+        self.assertEqual(engine.run(), {"status": "succeeded"})
+        self.assertEqual(len(adapter.event_stream), 301)
+        steps = {data["step_id"]: data for kind, data in management.events
+                 if kind == "step" and data["status"] == "succeeded"}
+        self.assertEqual(steps["confirm-es-exit"]["es_event_id"], 14)
 
     def test_direct_write_not_denied_stops_before_pointer_edit(self):
         engine, adapter, _management = self.build(direct_denied=False)

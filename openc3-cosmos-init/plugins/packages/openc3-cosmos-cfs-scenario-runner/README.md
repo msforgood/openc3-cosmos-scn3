@@ -1,8 +1,8 @@
 # CFS Scenario Runner procedure plugin
 
-Independent `openc3-cosmos-cfs-scenario-runner` **1.0.11**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image builds and installs it together with the Scenario UI.
+Independent `openc3-cosmos-cfs-scenario-runner` **1.0.13**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image builds and installs it together with the Scenario UI.
 
-This scenario 3 branch upgrades the installed 1.0.9 Scenario Runner catalog. It retains the scenario 2 TC log/photo traversal and housekeeping checks, and adds the MM indirect-write demonstration for QEMU and BBB. The scenario 1 CRC/X-band procedure is absent because this branch's cFS plugin has no XKEY/X-band packet definitions.
+This integration release includes all three cFS demonstrations on QEMU and BBB, plus the two housekeeping checks. The PSP indirect-write procedure subscribes to the EVS packet stream before resuming the pulse app, so a later EVS event cannot erase the cFE ES exit confirmation from the latest-value cache.
 
 The shipped scenarios are fixed:
 
@@ -14,8 +14,10 @@ The shipped scenarios are fixed:
 | `bbb-tc-log-photo-traversal` | `CFS-1_BBB` | CI_LAB log TC and camera TC | Read the same sealed onboard log before and after the photo write |
 | `qemu-psp-mm-indirect-write` | `CFS-1_QEMU` | MM map/read/write and payload app controls | Direct write denied; one pointer byte changed; controller fault and halt ACK |
 | `bbb-psp-mm-indirect-write` | `CFS-1_BBB` | Same fixed command family | Same bounded evidence on BBB |
+| `qemu-cs-crc-key-oracle` | `CFS-1_QEMU` | Sixteen one-byte CS OneShot commands | CRC key recovery and authenticated X-band frame |
+| `bbb-cs-crc-key-oracle` | `CFS-1_BBB` | Same fixed command family | Same bounded evidence on BBB |
 
-There is no payload override, arbitrary code, shell step, general command entry, reset, or configuration change. The BBB path accepts only the two fixed demonstrations. Housekeeping requests do not necessarily increment `COMMAND_COUNTER`: unchanged values are acceptable only on a provably newer received packet. Periodic housekeeping can also satisfy the freshness condition; success does not prove exclusive causality from the request.
+There is no payload override, arbitrary code, shell step, general command entry, reset, or configuration change. Housekeeping requests do not necessarily increment `COMMAND_COUNTER`: unchanged values are acceptable only on a provably newer received packet. Periodic housekeeping can also satisfy the freshness condition; success does not prove exclusive causality from the request.
 
 ## Canonical inputs and validation
 
