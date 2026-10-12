@@ -2,6 +2,7 @@
 
 from datetime import datetime, timezone
 import copy
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -22,12 +23,13 @@ class Management:
     run_id = "tc_log_demo"
     scope = "DEFAULT"
 
-    def __init__(self, definition, clock):
+    def __init__(self, definition, clock, target="CFS-1_QEMU"):
         self.events = []
         self.context_data = {
             "run_id": self.run_id, "scope": self.scope,
-            "target": definition["supportedTargets"][0], "definition": copy.deepcopy(definition),
+            "target": target, "definition": copy.deepcopy(definition),
             "definition_hash": runner.canonical_hash(definition), "stop_requested": False,
+            "execution_mode": "automatic",
             "prompt": None, "deadline": datetime.fromtimestamp(clock.now + 120, timezone.utc).isoformat(),
         }
 
@@ -129,11 +131,11 @@ class Adapter:
 class TcLogDemoTests(unittest.TestCase):
     def build(self, target="CFS-1_QEMU", **adapter_options):
         catalog = runner.load_catalog()
-        scenario_id = runner.TCLOG["scenarioIds"][target]
+        scenario_id = runner.TCLOG["scenarioId"]
         definition = catalog[scenario_id]
         clock = Clock()
         adapter = Adapter(clock, **adapter_options)
-        management = Management(definition, clock)
+        management = Management(definition, clock, target=target)
         engine = runner.ScenarioRunner(adapter, management, catalog, runner.canonical_hash(definition),
                                        monotonic=lambda: clock.now, wall_time=lambda: clock.now,
                                        sleep=clock.sleep, call=lambda fn, _seconds, _label: fn())
@@ -151,6 +153,12 @@ class TcLogDemoTests(unittest.TestCase):
                 self.assertEqual(steps["overwrite-log"]["filename"], "../log/tc0002.log")
                 self.assertGreater(steps["confirm-continuity"]["active_index"], 2)
                 self.assertEqual(adapter.sent[0][0], "CI_LOG_SEAL_CMD")
+                overwrite = [data for kind, data in management.events if kind == "command" and
+                             data["step_id"] == "overwrite-log"]
+                self.assertEqual(len(overwrite), 1)
+                self.assertEqual(overwrite[0]["packet"], "TC_CAMERA_CAPTURE_CMD")
+                self.assertEqual(json.loads(overwrite[0]["parameters_json"])["FILENAME"],
+                                 "../log/tc0002.log")
 
     def test_camera_success_without_file_change_does_not_claim_success(self):
         engine, adapter, _management = self.build(replacement=False)

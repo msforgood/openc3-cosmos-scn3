@@ -1,0 +1,32 @@
+<%= cfs_tlm_hdr(target_name, 'CI_LOG_STATUS', 'Onboard TC log status') %>
+   APPEND_ITEM REQUEST_ID 16 UINT "Request identifier"
+   APPEND_ITEM RESULT 16 UINT "Log operation result"
+      STATE OK 0
+      STATE IO_ERROR 1
+      STATE BAD_INDEX 2
+      STATE ACTIVE_FILE 3
+      STATE BAD_OFFSET 4
+      STATE NO_CLOSED_FILE 5
+      STATE INDEX_EXHAUSTED 6
+   APPEND_ITEM ACTIVE_INDEX 16 UINT "Current tcNNNN.log index"
+   APPEND_ITEM LAST_CLOSED_INDEX 16 UINT "Most recently sealed log index"
+   APPEND_ITEM ACTIVE_RECORDS 32 UINT "Records in the active file"
+   APPEND_ITEM TOTAL_LOGGED 32 UINT "Total recorded TC datagrams"
+   APPEND_ITEM WRITE_ERRORS 32 UINT "Onboard log write errors"
+   APPEND_ITEM READ_ERRORS 32 UINT "Onboard log read errors"
+
+<%= cfs_tlm_hdr(target_name, 'CI_LOG_CHUNK', 'Sealed onboard TC log file content') %>
+   APPEND_ITEM REQUEST_ID 16 UINT "Request identifier"
+   APPEND_ITEM RESULT 16 UINT "Log read result"
+      STATE OK 0
+      STATE IO_ERROR 1
+      STATE BAD_INDEX 2
+      STATE ACTIVE_FILE 3
+      STATE BAD_OFFSET 4
+      STATE NO_CLOSED_FILE 5
+      STATE INDEX_EXHAUSTED 6
+   APPEND_ITEM FILE_INDEX 16 UINT "Requested tcNNNN.log index"
+   APPEND_ITEM DATA_LENGTH 16 UINT "Valid bytes in DATA"
+   APPEND_ITEM OFFSET 32 UINT "Requested byte offset"
+   APPEND_ITEM FILE_SIZE 32 UINT "Full file length"
+   APPEND_ARRAY_ITEM DATA 8 UINT 2048 "256 raw bytes; trailing bytes zero padded"

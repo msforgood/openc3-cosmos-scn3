@@ -1,6 +1,6 @@
 # Scenario management API
 
-This Rails API manages the two fixed QEMU housekeeping scenarios through the existing OpenC3 Script Runner 6.10.1. It does not execute Ruby/Python locally, accept arbitrary scripts or command parameters, modify the CFS plugin, or install a plugin. The shared protocol is in [CONTRACT.md](CONTRACT.md). Deployment is integrated in the repository root Compose and the image-contained cosmos-init bootstrap; see [Scenario Runner](../SCENARIO_RUNNER.md).
+This Rails API manages three fixed Scenario Runner definitions, each selectable for QEMU or BBB. It launches the installed procedures through OpenC3 Script Runner 6.10.1. It does not execute Ruby/Python locally, accept arbitrary scripts or command parameters, modify the cFS target plugin, or install a plugin. The shared protocol is in [CONTRACT.md](CONTRACT.md). Deployment is integrated in the repository root Compose and the image-contained cosmos-init bootstrap; see [Scenario Runner deployment](../docs/all-three-scenarios.md).
 
 ## Build and test
 
@@ -8,7 +8,7 @@ From the repository root (the additional build context supplies the canonical pr
 
 ```sh
 docker compose build scenario-api
-docker run --rm --network none --entrypoint bundle local/openc3-scenario-api:6.10.1-1.0.4 exec rake test
+docker run --rm --network none --entrypoint bundle local/openc3-scenario-api:6.10.1-1.0.22 exec rake test
 ```
 
 The test container is isolated from all OpenC3 deployments and sends no commands. The image bundles pinned OpenC3 6.10.1, Rails 7.2 and Puma 7 (required by this OpenC3 gem), plus SQLite. `Gemfile.lock` fixes transitive dependencies. Build argument `OPENC3_BASE_IMAGE` may select a local mirror of the 6.10.1 Script Runner API image. The image runs as UID/GID 1001 and initializes `/data` with matching ownership.
@@ -58,8 +58,8 @@ After restart, reconciliation resumes from durable records and never dispatches 
 | SQLite | WAL + `synchronous=FULL`, 5-second busy timeout, approximately 512 MiB max database pages; 16 MiB retained WAL target |
 | Callback events per run | 1,000, plus 16 reserved lifecycle events; saturation requests stop |
 | Event / text | 4 KiB / 2 KiB; flat scalar fields only |
-| Catalog / definitions / steps | 64 KiB / 32 / 16; strict schema plus per-command fresh-wait pairing and total time budget |
-| API run deadline / prompt | At most 120 seconds / 120 seconds and within run deadline; shipped runs are 30 seconds |
+| Catalog / definitions / steps | 64 KiB / 32 / 18; strict schema and fixed scenario-family validation |
+| API run deadline / prompt | Automatic runs at most 120 seconds; manual runs 30 minutes; prompts remain within the run deadline |
 | Polling / reconciliation | Two-second interval, serialized; maximum 1,000 running + 1,000 completed statuses scanned per unassociated run |
 | HTTP launch | 3-second connect/write, 5-second read, 10-second wall bound, zero retries, 128-byte response |
 | Redis/auth/preflight waits | 5–8 seconds, no unbounded retry loop |

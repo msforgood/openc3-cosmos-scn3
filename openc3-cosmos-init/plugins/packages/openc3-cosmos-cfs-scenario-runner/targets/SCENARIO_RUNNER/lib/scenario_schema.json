@@ -41,7 +41,7 @@
     "supportedTargets": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 1,
+      "maxItems": 2,
       "uniqueItems": true,
       "items": {
         "enum": [
@@ -122,7 +122,7 @@
           "const": "allStepsSucceeded"
         },
         "requireFreshTelemetry": {
-          "const": true
+          "type": "boolean"
         }
       }
     }
@@ -142,8 +142,7 @@
         "CI_LOG_CHUNK",
         "TC_CAMERA_RESULT",
         "MM_DEBUG",
-        "PAYLOAD_PULSE_STATE",
-        "PAYLOAD_CTRL_STATE",
+        "PAYLOAD_DATA_STATE",
         "XBAND_FRAME"
       ]
     },
@@ -161,10 +160,10 @@
         "RESULT",
         "STATUS",
         "POINTER_SLOT",
-        "FEED_TARGET_ADDRESS",
         "STATE",
-        "FAULT",
-        "HALT_ACKED",
+        "WRITE_TARGET_ADDRESS",
+        "GUARD_ADDRESS",
+        "SAMPLE_COUNT",
         "MAGIC",
         "IV_PREFIX",
         "COUNTER",
@@ -388,12 +387,10 @@
             "deny-direct-write",
             "pause",
             "read-pointer",
-            "write-pointer-byte",
+            "write-pointer",
             "verify-pointer",
             "resume",
-            "observe-fault",
-            "confirm-es-exit",
-            "confirm-pulse"
+            "confirm-sigsegv"
           ]
         }
       }

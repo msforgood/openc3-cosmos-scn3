@@ -1,0 +1,172 @@
+SCREEN AUTO AUTO 1.0
+
+<% require 'cfs_target_num_color' %>
+<% require 'cfs_globals' %>
+<% require 'cfs_fleet_globals' %>
+
+VERTICAL
+    TITLE "cFS FSW Fleet Overview" Courier 20 Normal true
+    SETTING TEXTCOLOR <%= cfs_target_num_color(target_name) %>
+    TABBOOK
+        <% cfs_fleet_target_names.each do |fleet_target| %>
+            TABITEM "<%= fleet_target %>"
+                BUTTON 'Enable TM' 'api.cmd("<%= fleet_target %> TO_LAB_CMD_ENABLE_OUTPUT")'
+                MATRIXBYCOLUMNS 7 2
+                    LABEL "App Name"
+                    LABEL "Seq Count"
+                    LABEL "Cmd Count"
+                    LABEL "Err Count"
+                    LABEL "Send HK"
+                    LABEL "No-Op Cmd"
+                    LABEL "Reset Cmd"
+
+                    LABEL "CFE_ES"
+                    VALUE <%= fleet_target %> CFE_ES_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CFE_ES_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CFE_ES_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CFE_ES_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CFE_ES_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CFE_ES_CMD_RESET_COUNTERS")'
+
+                    LABEL "CFE_EVS"
+                    VALUE <%= fleet_target %> CFE_EVS_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CFE_EVS_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CFE_EVS_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CFE_EVS_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CFE_EVS_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CFE_EVS_CMD_RESET_COUNTERS")'
+
+                    LABEL "CFE_SB"
+                    VALUE <%= fleet_target %> CFE_SB_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CFE_SB_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CFE_SB_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CFE_SB_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CFE_SB_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CFE_SB_CMD_RESET_COUNTERS")'
+
+                    LABEL "CFE_TBL"
+                    VALUE <%= fleet_target %> CFE_TBL_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CFE_TBL_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CFE_TBL_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CFE_TBL_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CFE_TBL_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CFE_TBL_CMD_RESET_COUNTERS")'
+
+                    LABEL "CFE_TIME"
+                    VALUE <%= fleet_target %> CFE_TIME_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CFE_TIME_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CFE_TIME_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CFE_TIME_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CFE_TIME_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CFE_TIME_CMD_RESET_COUNTERS")'
+
+                    LABEL "CI_LAB"
+                    VALUE <%= fleet_target %> CI_LAB_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CI_LAB_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CI_LAB_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CI_LAB_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CI_LAB_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CI_LAB_CMD_RESET_COUNTERS")'
+
+                    LABEL "TO_LAB"
+                    VALUE <%= fleet_target %> TO_LAB_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> TO_LAB_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> TO_LAB_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> TO_LAB_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> TO_LAB_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> TO_LAB_CMD_RESET_COUNTERS")'
+
+                    LABEL "SAMPLE_APP"
+                    VALUE <%= fleet_target %> SAMPLE_APP_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> SAMPLE_APP_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> SAMPLE_APP_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> SAMPLE_APP_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> SAMPLE_APP_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> SAMPLE_APP_CMD_RESET_COUNTERS")'
+
+                    LABEL "CF"
+                    VALUE <%= fleet_target %> CF_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CF_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CF_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CF_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CF_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CF_CMD_RESET")'
+
+                    LABEL "CS"
+                    VALUE <%= fleet_target %> CS_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> CS_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> CS_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> CS_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> CS_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> CS_CMD_RESET_COUNTERS")'
+
+                    LABEL "DS"
+                    VALUE <%= fleet_target %> DS_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> DS_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> DS_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> DS_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> DS_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> DS_CMD_RESET_COUNTERS")'
+
+                    LABEL "FM"
+                    VALUE <%= fleet_target %> FM_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> FM_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> FM_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> FM_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> FM_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> FM_CMD_RESET_COUNTERS")'
+
+                    LABEL "HK"
+                    VALUE <%= fleet_target %> HK_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> HK_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> HK_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> HK_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> HK_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> HK_CMD_RESET_COUNTERS")'
+
+                    LABEL "LC"
+                    VALUE <%= fleet_target %> LC_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> LC_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> LC_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> LC_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> LC_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> LC_CMD_RESET_COUNTERS")'
+
+                    LABEL "MD"
+                    VALUE <%= fleet_target %> MD_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> MD_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> MD_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> MD_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> MD_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> MD_CMD_RESET_COUNTERS")'
+
+                    LABEL "MM"
+                    VALUE <%= fleet_target %> MM_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> MM_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> MM_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> MM_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> MM_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> MM_CMD_RESET_COUNTERS")'
+
+                    LABEL "SBN"
+                    VALUE <%= fleet_target %> SBN_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> SBN_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> SBN_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> SBN_CMD_HK")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> SBN_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> SBN_CMD_HK_RESET")'
+
+                    LABEL "SC"
+                    VALUE <%= fleet_target %> SC_HK CCSDS_SEQUENCE
+                    VALUE <%= fleet_target %> SC_HK COMMAND_COUNTER
+                    VALUE <%= fleet_target %> SC_HK COMMAND_ERROR_COUNTER
+                    BUTTON 'Send Hk' 'api.cmd("<%= fleet_target %> SC_SEND_HK_CMD")'
+                    BUTTON 'No-Op' 'api.cmd("<%= fleet_target %> SC_CMD_NOOP")'
+                    BUTTON 'Reset' 'api.cmd("<%= fleet_target %> SC_CMD_RESET_COUNTERS")'
+
+                END
+            END
+        <% end %>
+    END
+
+END

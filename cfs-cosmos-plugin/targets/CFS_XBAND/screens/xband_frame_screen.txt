@@ -1,0 +1,9 @@
+SCREEN AUTO AUTO 1.0
+VERTICAL
+  TITLE "Encrypted X-band lab stream" Courier 20 Normal true
+  LABELVALUEDESC <%= target_name %> XBAND_FRAME COUNTER "Frame counter:"
+  LABELVALUEDESC <%= target_name %> XBAND_FRAME CIPHERTEXT_0 "Ciphertext word 0:"
+  LABELVALUEDESC <%= target_name %> XBAND_FRAME CIPHERTEXT_1 "Ciphertext word 1:"
+  LABELVALUEDESC <%= target_name %> XBAND_FRAME CIPHERTEXT_2 "Ciphertext word 2:"
+  LABELVALUEDESC <%= target_name %> XBAND_FRAME CIPHERTEXT_3 "Ciphertext word 3:"
+END

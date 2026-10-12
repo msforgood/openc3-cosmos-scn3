@@ -49,21 +49,17 @@
       "telemetryPacket": "MM_DEBUG",
       "streamId": 6374
     },
-    "PAYLOAD_PULSE_PAUSE_CMD": {
-      "telemetryPacket": "PAYLOAD_PULSE_STATE",
+    "PAYLOAD_DATA_PAUSE_CMD": {
+      "telemetryPacket": "PAYLOAD_DATA_STATE",
       "streamId": 6372
     },
-    "PAYLOAD_PULSE_RESUME_CMD": {
-      "telemetryPacket": "PAYLOAD_PULSE_STATE",
+    "PAYLOAD_DATA_RESUME_CMD": {
+      "telemetryPacket": "PAYLOAD_DATA_STATE",
       "streamId": 6372
     },
-    "PAYLOAD_PULSE_STATUS_CMD": {
-      "telemetryPacket": "PAYLOAD_PULSE_STATE",
+    "PAYLOAD_DATA_STATUS_CMD": {
+      "telemetryPacket": "PAYLOAD_DATA_STATE",
       "streamId": 6372
-    },
-    "PAYLOAD_CTRL_STATUS_CMD": {
-      "telemetryPacket": "PAYLOAD_CTRL_STATE",
-      "streamId": 6373
     }
   },
   "telemetryItems": [
@@ -79,10 +75,10 @@
     "RESULT",
     "STATUS",
     "POINTER_SLOT",
-    "FEED_TARGET_ADDRESS",
+    "WRITE_TARGET_ADDRESS",
+    "GUARD_ADDRESS",
+    "SAMPLE_COUNT",
     "STATE",
-    "FAULT",
-    "HALT_ACKED",
     "MAGIC",
     "IV_PREFIX",
     "COUNTER",
@@ -108,10 +104,10 @@
     "TC_CAMERA_RESULT.STATUS": 16,
     "MM_DEBUG.STATUS": 32,
     "MM_DEBUG.POINTER_SLOT": 64,
-    "PAYLOAD_PULSE_STATE.STATE": 8,
-    "PAYLOAD_PULSE_STATE.FEED_TARGET_ADDRESS": 32,
-    "PAYLOAD_CTRL_STATE.FAULT": 8,
-    "PAYLOAD_CTRL_STATE.HALT_ACKED": 8,
+    "PAYLOAD_DATA_STATE.STATE": 8,
+    "PAYLOAD_DATA_STATE.WRITE_TARGET_ADDRESS": 32,
+    "PAYLOAD_DATA_STATE.GUARD_ADDRESS": 32,
+    "PAYLOAD_DATA_STATE.SAMPLE_COUNT": 32,
     "CS_HK.COMMAND_COUNTER": 8,
     "CS_HK.COMMAND_ERROR_COUNTER": 8,
     "XBAND_FRAME.MAGIC": 32,
@@ -136,10 +132,7 @@
       "read-after",
       "confirm-continuity"
     ],
-    "scenarioIds": {
-      "CFS-1_QEMU": "qemu-tc-log-photo-traversal",
-      "CFS-1_BBB": "bbb-tc-log-photo-traversal"
-    },
+    "scenarioId": "tc-log-photo-traversal",
     "commandPackets": [
       "CI_LOG_STATUS_CMD",
       "CI_LOG_SEAL_CMD",
@@ -163,42 +156,28 @@
       "deny-direct-write",
       "pause",
       "read-pointer",
-      "write-pointer-byte",
+      "write-pointer",
       "verify-pointer",
       "resume",
-      "observe-fault",
-      "confirm-es-exit",
-      "confirm-pulse"
+      "confirm-sigsegv"
     ],
-    "scenarioIds": {
-      "CFS-1_QEMU": "qemu-psp-mm-indirect-write",
-      "CFS-1_BBB": "bbb-psp-mm-indirect-write"
-    },
+    "scenarioId": "psp-mm-indirect-write",
     "commandPackets": [
       "MM_CMD_DEBUG_MAP",
       "MM_CMD_DEBUG_READ",
       "MM_CMD_DEBUG_WRITE",
-      "PAYLOAD_PULSE_PAUSE_CMD",
-      "PAYLOAD_PULSE_RESUME_CMD",
-      "PAYLOAD_PULSE_STATUS_CMD",
-      "PAYLOAD_CTRL_STATUS_CMD"
+      "PAYLOAD_DATA_PAUSE_CMD",
+      "PAYLOAD_DATA_RESUME_CMD",
+      "PAYLOAD_DATA_STATUS_CMD"
     ],
     "telemetryPackets": [
       "MM_DEBUG",
-      "PAYLOAD_PULSE_STATE",
-      "PAYLOAD_CTRL_STATE"
+      "PAYLOAD_DATA_STATE"
     ],
-    "eventPacket": "CFE_EVS_LONG_EVENT_MSG",
-    "esExitEventId": 14,
-    "pointerBytes": 4,
-    "expectedKickLowByte": 64,
-    "expectedModeLowByte": 255
+    "pointerBytes": 4
   },
   "crcKeyOracle": {
-    "scenarioTargets": {
-      "qemu-cs-crc-key-oracle": "CFS-1_QEMU",
-      "bbb-cs-crc-key-oracle": "CFS-1_BBB"
-    },
+    "scenarioId": "cs-crc-key-oracle",
     "command": "CS_CMD_ONE_SHOT",
     "streamId": 6352,
     "functionCode": 2,

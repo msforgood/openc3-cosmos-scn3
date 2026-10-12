@@ -26,7 +26,7 @@ export function displayValue(value) {
   if (typeof value === 'object') {
     if (value.raw) return String(value.raw)
     if (Array.isArray(value)) return `[${value.slice(0, 8).map(displayValue).join(', ')}${value.length > 8 ? ', …' : ''}]`
-    return 'Unsupported value'
+    return '지원하지 않는 값'
   }
   return String(value).slice(0, 160)
 }
@@ -61,26 +61,26 @@ export function limitsGauge(thresholds, value) {
   const colors = thresholds.length === 6 ? ['alarm', 'caution', 'within', 'blue', 'within', 'caution', 'alarm'] : ['alarm', 'caution', 'within', 'caution', 'alarm']
   const segments = colors.map((color, i) => ({ color, width: position(boundaries[i + 1]) - position(boundaries[i]) }))
   const pointer = numeric(value) === null ? null : position(value)
-  const overflow = pointer === null ? '' : value < min ? 'Below scale' : value > max ? 'Above scale' : ''
+  const overflow = pointer === null ? '' : value < min ? '눈금 아래' : value > max ? '눈금 위' : ''
   const labels = ['RL', 'YL', 'YH', 'RH', 'GL', 'GH']
   return { min, max, segments, pointer, overflow, description: thresholds.map((v, i) => `${labels[i]} ${v}`).join(' · ') }
 }
 
 export function itemStatus({ pair, receipt, connected, lastSuccess, metadata, limitsSet }, now) {
   const status = (kind, label, icon) => ({ kind, label, icon })
-  if (connected === false || (lastSuccess !== null && now - lastSuccess > STALE_MS)) return status('disconnected', 'Disconnected', '×')
-  if (pair.state === 'STALE' || (receipt !== null && (now - receipt > STALE_MS || receipt > now + 5000))) return status('stale', 'Stale', '◷')
-  if (connected !== true || receipt === null || pair.value === null || (typeof pair.value === 'number' && !finite(pair.value)) || typeof pair.value === 'object') return status('unknown', 'No data', '?')
+  if (connected === false || (lastSuccess !== null && now - lastSuccess > STALE_MS)) return status('disconnected', '연결 끊김', '×')
+  if (pair.state === 'STALE' || (receipt !== null && (now - receipt > STALE_MS || receipt > now + 5000))) return status('stale', '오래됨', '◷')
+  if (connected !== true || receipt === null || pair.value === null || (typeof pair.value === 'number' && !finite(pair.value)) || typeof pair.value === 'object') return status('unknown', '데이터 없음', '?')
   const limits = itemLimits(metadata, limitsSet)
-  if (!limits.known) return status('unknown', 'Limits unknown', '?')
-  if (!limits.configured) return status('unconfigured', 'No limits', '—')
-  if (limits.enabled === false) return status('disabled', 'Limits disabled', '⊘')
-  if (limits.enabled !== true) return status('unknown', 'Limits enable state unknown', '?')
-  if (['RED', 'RED_LOW', 'RED_HIGH'].includes(pair.state)) return status('alarm', `Alarm · ${pair.state}`, '!')
-  if (['YELLOW', 'YELLOW_LOW', 'YELLOW_HIGH'].includes(pair.state)) return status('caution', `Caution · ${pair.state}`, '△')
-  if (['GREEN', 'GREEN_LOW', 'GREEN_HIGH'].includes(pair.state)) return status('within', 'Within limits', '✓')
-  if (pair.state === 'BLUE') return status('within', 'Within limits · BLUE', '◆')
-  return status('unknown', 'State unknown', '?')
+  if (!limits.known) return status('unknown', 'Limits 정보 없음', '?')
+  if (!limits.configured) return status('unconfigured', 'Limits 없음', '—')
+  if (limits.enabled === false) return status('disabled', 'Limits 비활성', '⊘')
+  if (limits.enabled !== true) return status('unknown', 'Limits 활성화 상태 알 수 없음', '?')
+  if (['RED', 'RED_LOW', 'RED_HIGH'].includes(pair.state)) return status('alarm', `경보 · ${pair.state}`, '!')
+  if (['YELLOW', 'YELLOW_LOW', 'YELLOW_HIGH'].includes(pair.state)) return status('caution', `주의 · ${pair.state}`, '△')
+  if (['GREEN', 'GREEN_LOW', 'GREEN_HIGH'].includes(pair.state)) return status('within', '정상 범위', '✓')
+  if (pair.state === 'BLUE') return status('within', '정상 범위 · BLUE', '◆')
+  return status('unknown', '상태 알 수 없음', '?')
 }
 
 export function appendSample(samples, value, receipt, now, fresh = true) {

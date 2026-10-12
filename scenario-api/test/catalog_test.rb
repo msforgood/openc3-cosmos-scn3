@@ -2,7 +2,30 @@ require_relative 'test_helper'
 
 class CatalogTest < ScenarioTest
   def definition
-    @catalog.get('qemu-es-housekeeping')
+    housekeeping_fixture
+  end
+
+  def test_published_catalog_has_three_ordered_scenarios_shared_by_both_targets
+    assert_equal %w[cs-crc-key-oracle tc-log-photo-traversal psp-mm-indirect-write],
+                 @catalog.definitions.map { |item| item['id'] }
+    %w[CFS-1_QEMU CFS-1_BBB].each do |target|
+      items = @catalog.definitions.select { |item| item['supportedTargets'].include?(target) }
+      assert_equal %w[cs-crc-key-oracle tc-log-photo-traversal psp-mm-indirect-write],
+                   items.map { |item| item['id'] }
+      assert_equal ['01. CS 1바이트 CRC 키 복원', '02. TC 로그 사진 경로 변경', '03. MM 포인터 변경'],
+                   items.map { |item| item['name'] }
+    end
+  end
+
+  def test_catalog_loads_korean_names_when_openc3_sets_binary_encoding
+    original_external, original_internal = Encoding.default_external, Encoding.default_internal
+    Encoding.default_external = Encoding::BINARY
+    Encoding.default_internal = Encoding::BINARY
+    catalog = Scenario::Catalog.new(path: File.expand_path('../config/scenarios.json', __dir__))
+    assert_equal '01. CS 1바이트 CRC 키 복원', catalog.definitions.first['name']
+  ensure
+    Encoding.default_external = original_external
+    Encoding.default_internal = original_internal
   end
 
   def validate(d)
@@ -57,29 +80,39 @@ class CatalogTest < ScenarioTest
     assert_error('invalid_catalog') { validate(d) }
   end
 
-  def test_tc_log_demo_is_fixed_for_each_target
-    %w[qemu bbb].each do |platform|
-      d = @catalog.get("#{platform}-tc-log-photo-traversal")
-      assert validate(d)
-      d['steps'][4]['phase'] = 'read-after'
-      assert_error('invalid_catalog') { validate(d) }
-      d = @catalog.get("#{platform}-tc-log-photo-traversal")
-      d['telemetryItems'] << {'packet' => 'CFE_ES_HK', 'item' => 'COMMAND_COUNTER'}
-      assert_error('invalid_catalog') { validate(d) }
-    end
+  def test_tc_log_demo_is_fixed_for_both_targets
+    d = @catalog.get('tc-log-photo-traversal')
+    assert validate(d)
+    d['steps'][4]['phase'] = 'read-after'
+    assert_error('invalid_catalog') { validate(d) }
+    d = @catalog.get('tc-log-photo-traversal')
+    d['telemetryItems'] << {'packet' => 'CFE_ES_HK', 'item' => 'COMMAND_COUNTER'}
+    assert_error('invalid_catalog') { validate(d) }
   end
 
-  def test_crc_oracle_is_fixed_to_its_target_and_requires_xband_authentication
-    { 'qemu-cs-crc-key-oracle' => 'CFS-1_QEMU', 'bbb-cs-crc-key-oracle' => 'CFS-1_BBB' }.each do |id, target|
-      definition = @catalog.get(id)
-      assert_equal [target], definition['supportedTargets']
-      assert_equal 18, definition['steps'].size
-      assert validate(definition)
-      definition['supportedTargets'] = [target == 'CFS-1_QEMU' ? 'CFS-1_BBB' : 'CFS-1_QEMU']
-      assert_error('invalid_catalog') { validate(definition) }
-      definition = @catalog.get(id)
-      definition['steps'].pop
-      assert_error('invalid_catalog') { validate(definition) }
+  def test_crc_oracle_requires_both_targets_and_xband_authentication
+    definition = @catalog.get('cs-crc-key-oracle')
+    assert_equal %w[CFS-1_QEMU CFS-1_BBB], definition['supportedTargets']
+    assert_equal 18, definition['steps'].size
+    assert validate(definition)
+    [%w[CFS-1_QEMU], %w[CFS-1_BBB CFS-1_BBB], %w[CFS-1_QEMU OTHER]].each do |targets|
+      changed = @catalog.get('cs-crc-key-oracle')
+      changed['supportedTargets'] = targets
+      assert_error('invalid_catalog') { validate(changed) }
     end
+    definition['steps'].pop
+    assert_error('invalid_catalog') { validate(definition) }
+  end
+
+  def test_psp_crash_scenario_requires_observer_outcome_and_fixed_steps
+    definition = @catalog.get('psp-mm-indirect-write')
+    assert_equal false, definition.dig('successCriteria', 'requireFreshTelemetry')
+    assert_equal 'confirm-sigsegv', definition['steps'].last['id']
+    assert validate(definition)
+    definition['successCriteria']['requireFreshTelemetry'] = true
+    assert_error('invalid_catalog') { validate(definition) }
+    definition = @catalog.get('psp-mm-indirect-write')
+    definition['steps'].pop
+    assert_error('invalid_catalog') { validate(definition) }
   end
 end

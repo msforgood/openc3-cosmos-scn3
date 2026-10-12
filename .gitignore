@@ -4,6 +4,7 @@ playwright/openc3-cosmos-pw-test/
 *.so
 *.bundle
 *.gem
+!/openc3-cosmos-init/cfs-artifacts/openc3-cosmos-cfs-7.0.5.pre.all.2.gem
 Makefile
 *Gemfile.lock
 package-lock.json

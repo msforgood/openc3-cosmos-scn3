@@ -1,0 +1,18 @@
+# Independent synthetic X-band UDP stream. This packet is not CCSDS and is
+# received only by the dedicated read-only UDP interface in plugin.txt.
+TELEMETRY <%= target_name %> XBAND_FRAME BIG_ENDIAN "Encrypted X-band lab telemetry"
+    APPEND_ID_ITEM MAGIC       32 UINT 0x58424431 "XBD1 frame identifier"
+    APPEND_ITEM    IV_PREFIX   32 UINT "Random per-start IV prefix"
+    APPEND_ITEM    COUNTER     64 UINT "Monotonic frame counter"
+    APPEND_ITEM    CIPHERTEXT_0 32 UINT "Encrypted payload word 0"
+        FORMAT_STRING "0x%08X"
+    APPEND_ITEM    CIPHERTEXT_1 32 UINT "Encrypted payload word 1"
+        FORMAT_STRING "0x%08X"
+    APPEND_ITEM    CIPHERTEXT_2 32 UINT "Encrypted payload word 2"
+        FORMAT_STRING "0x%08X"
+    APPEND_ITEM    CIPHERTEXT_3 32 UINT "Encrypted payload word 3"
+        FORMAT_STRING "0x%08X"
+    APPEND_ITEM    TAG_0       32 UINT "AES-GCM tag word 0"
+    APPEND_ITEM    TAG_1       32 UINT "AES-GCM tag word 1"
+    APPEND_ITEM    TAG_2       32 UINT "AES-GCM tag word 2"
+    APPEND_ITEM    TAG_3       32 UINT "AES-GCM tag word 3"

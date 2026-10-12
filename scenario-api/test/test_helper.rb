@@ -72,8 +72,11 @@ class ScenarioTest < Minitest::Test
   def build_service(store = @store, max_active: 4)
     Scenario::Service.new(store: store, catalog: @catalog, backend: @backend, auth: @auth, clock: -> { @time }, max_active: max_active)
   end
+  def housekeeping_fixture
+    JSON.parse(File.read(File.expand_path('fixtures/housekeeping.json', __dir__), encoding: 'UTF-8'))
+  end
   def input(key = 'request-0001', scope: 'DEFAULT')
-    d = @catalog.definitions.first
+    d = @catalog.definitions.find { |definition| definition['id'] == 'qemu-es-housekeeping' } || @catalog.definitions.first
     { 'scope' => scope, 'target' => 'CFS-1_QEMU', 'scenario_id' => d['id'],
       'definition_version' => d['version'], 'definition_hash' => Scenario::Canonical.hash(d), 'request_id' => key }
   end

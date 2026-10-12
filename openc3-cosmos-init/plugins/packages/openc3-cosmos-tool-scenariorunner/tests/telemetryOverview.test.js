@@ -31,8 +31,8 @@ describe('fixed actual-limit gauge', () => {
     expect(gauge.pointer).toBeCloseTo(23.333333)
     expect(gauge.segments.map((s) => s.color)).toEqual(['alarm', 'caution', 'within', 'caution', 'alarm'])
     expect(gauge.segments.reduce((sum, s) => sum + s.width, 0)).toBeCloseTo(100)
-    expect(limitsGauge([-10, -5, 30, 50], -100)).toMatchObject({ pointer: 0, overflow: 'Below scale' })
-    expect(limitsGauge([-10, -5, 30, 50], 100)).toMatchObject({ pointer: 100, overflow: 'Above scale' })
+    expect(limitsGauge([-10, -5, 30, 50], -100)).toMatchObject({ pointer: 0, overflow: '눈금 아래' })
+    expect(limitsGauge([-10, -5, 30, 50], 100)).toMatchObject({ pointer: 100, overflow: '눈금 위' })
     expect(limitsGauge([-10, -5, 30, 50], null).pointer).toBeNull()
   })
   it('handles optional blue band and equal adjacent thresholds without mutating metadata', () => {

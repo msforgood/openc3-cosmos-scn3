@@ -1,0 +1,9 @@
+SCREEN AUTO AUTO 1.0
+
+VERTICAL
+  TITLE "<%= target_name %> Simulated Camera" Courier 20 Normal true
+  LABELVALUEDESC <%= target_name %> TC_CAMERA_RESULT REQUEST_ID "Request ID:"
+  LABELVALUEDESC <%= target_name %> TC_CAMERA_RESULT STATUS "Capture status:"
+  LABELVALUEDESC <%= target_name %> TC_CAMERA_RESULT BYTES_WRITTEN "Bytes written:"
+  LABELVALUEDESC <%= target_name %> TC_CAMERA_RESULT FILENAME "Requested filename:"
+END

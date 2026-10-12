@@ -14,6 +14,10 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "lib"))
 import cfs_scenario_runner as runner
 
+HOUSEKEEPING = {
+    item["id"]: item for item in json.loads((ROOT / "tests/fixtures/housekeeping.json").read_text())
+}
+
 
 class Clock:
     def __init__(self):
@@ -110,7 +114,7 @@ class Management:
         self.ctx = {
             "run_id": self.run_id, "scope": self.scope, "target": "CFS-1_QEMU",
             "definition": copy.deepcopy(definition), "definition_hash": runner.canonical_hash(definition),
-            "stop_requested": False, "prompt": None,
+            "stop_requested": False, "prompt": None, "execution_mode": "automatic",
             "deadline": datetime.fromtimestamp(clock.now + definition["timeoutSec"], timezone.utc).isoformat(),
         }
 
@@ -127,7 +131,8 @@ class Management:
 class EngineTests(unittest.TestCase):
     def setUp(self):
         self.catalog = runner.load_catalog()
-        self.definition = copy.deepcopy(self.catalog["qemu-es-housekeeping"])
+        self.catalog.update(HOUSEKEEPING)
+        self.definition = copy.deepcopy(HOUSEKEEPING["qemu-es-housekeeping"])
         self.build()
 
     def build(self, definition=None):
@@ -148,6 +153,33 @@ class EngineTests(unittest.TestCase):
         first["timeoutSec"] = 60
         self.build(first)
 
+    def manual(self, *, grant_at=None, stop_at=None, prompt_id=None):
+        self.management.ctx["execution_mode"] = "manual"
+        self.management.ctx["deadline"] = datetime.fromtimestamp(
+            self.clock.now + runner.MANUAL_TIMEOUT_SEC, timezone.utc).isoformat()
+        original_emit = self.management.emit
+        original_context = self.management.context
+
+        def emit(kind, data):
+            if kind == "prompt":
+                self.management.ctx["prompt"] = {
+                    "prompt_id": prompt_id or data["prompt_id"], "choices": data["choices"],
+                    "status": "pending", "answer": None, "deadline": data["deadline"],
+                }
+            return original_emit(kind, data)
+
+        def context():
+            pending = self.management.ctx["prompt"]
+            if pending and pending["status"] == "pending":
+                if stop_at is not None and self.clock.now >= stop_at:
+                    self.management.ctx["stop_requested"] = True
+                elif grant_at is not None and self.clock.now >= grant_at:
+                    pending["status"], pending["answer"] = "answered", "continue"
+            return original_context()
+
+        self.management.emit = emit
+        self.management.context = context
+
     def assert_failure(self, code, no_sends=True):
         with self.assertRaisesRegex(runner.ScenarioError, code):
             self.engine.run()
@@ -162,6 +194,53 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(completed[0]["commandAccepted"])
         self.assertFalse(completed[0]["telemetryConfirmed"])
         self.assertTrue(completed[1]["telemetryConfirmed"])
+        commands = [data for kind, data in self.management.events if kind == "command"]
+        self.assertEqual(commands, [{"step_id": "request-hk", "packet": "CFE_ES_SEND_HK_CMD",
+                                     "parameters_json": "{}"}])
+        self.assertFalse(any(kind == "prompt" for kind, _data in self.management.events))
+
+    def test_manual_waits_for_the_next_step_without_restarting_script(self):
+        self.manual(grant_at=self.clock.now + 130)
+        self.assertEqual(self.engine.run(), {"status": "succeeded"})
+        self.assertGreaterEqual(self.clock.now, 1130)
+        self.assertEqual(len(self.adapter.sent), 1)
+        prompts = [data for kind, data in self.management.events if kind == "prompt"]
+        self.assertEqual([data["prompt_id"] for data in prompts], ["confirm-hk"])
+        self.assertEqual(prompts[0]["choices"], ["continue"])
+        self.assertTrue(any(seconds == runner.MANUAL_POLL_SEC for seconds in self.clock.sleeps))
+
+    def test_manual_prompts_follow_catalog_order_before_later_commands(self):
+        self.two_commands()
+        self.manual(grant_at=self.clock.now)
+        self.assertEqual(self.engine.run(), {"status": "succeeded"})
+        prompts = [data["prompt_id"] for kind, data in self.management.events if kind == "prompt"]
+        self.assertEqual(prompts, [step["id"] for step in self.definition["steps"][1:]])
+        self.assertEqual([packet for _target, packet, _parameters, _timeout, _time in self.adapter.sent],
+                         ["CFE_ES_SEND_HK_CMD", "CFE_EVS_SEND_HK_CMD"])
+        second_prompt = next(i for i, (kind, data) in enumerate(self.management.events)
+                             if kind == "prompt" and data["prompt_id"] == "evs-request-hk")
+        second_command = next(i for i, (kind, data) in enumerate(self.management.events)
+                              if kind == "command" and data["packet"] == "CFE_EVS_SEND_HK_CMD")
+        self.assertLess(second_prompt, second_command)
+
+    def test_manual_stop_while_waiting_never_runs_the_next_step(self):
+        self.manual(stop_at=self.clock.now + 4)
+        self.assert_failure("stop_requested", no_sends=False)
+        self.assertEqual(len(self.adapter.sent), 1)
+        self.assertFalse(any(kind == "step" and data.get("step_id") == "confirm-hk" and
+                             data.get("status") in ("running", "failed")
+                             for kind, data in self.management.events))
+
+    def test_manual_wrong_prompt_id_fails_closed(self):
+        self.manual(prompt_id="unexpected-step")
+        self.assert_failure("invalid_prompt", no_sends=False)
+        self.assertEqual(len(self.adapter.sent), 1)
+
+    def test_command_callback_failure_prevents_later_commands(self):
+        self.two_commands()
+        self.management.fail_on = lambda kind, _data: kind == "command"
+        self.assert_failure("callback_error", no_sends=False)
+        self.assertEqual(len(self.adapter.sent), 1)
 
     def test_second_scenario_works_without_engine_changes(self):
         self.build(copy.deepcopy(self.catalog["qemu-evs-housekeeping"]))
@@ -174,6 +253,7 @@ class EngineTests(unittest.TestCase):
         self.adapter.command_error = RuntimeError("Authorization: SECRET_DO_NOT_LOG")
         self.assert_failure("command_error", no_sends=False)
         self.assertEqual(len(self.adapter.sent), 1)
+        self.assertFalse(any(kind == "command" for kind, _data in self.management.events))
         self.assertNotIn("SECRET", json.dumps(self.management.events))
 
     def test_command_timeout_prevents_later_commands(self):
@@ -314,7 +394,7 @@ class EngineTests(unittest.TestCase):
 
 class ValidationTests(unittest.TestCase):
     def test_strict_invalid_definitions(self):
-        original = runner.load_catalog()["qemu-es-housekeeping"]
+        original = HOUSEKEEPING["qemu-es-housekeeping"]
         variants = []
         for path, value in [("timeoutSec", 1000), ("timeoutSec", True), ("timeoutSec", float("nan")), ("supportedTargets", ["CFS-1_BBB"]), ("schemaVersion", True), ("shell", "whoami")]:
             d = copy.deepcopy(original)
@@ -333,14 +413,26 @@ class ValidationTests(unittest.TestCase):
                 runner.validate_definition(d)
 
     def test_command_must_have_corresponding_wait(self):
-        d = runner.load_catalog()["qemu-es-housekeeping"]
+        d = copy.deepcopy(HOUSEKEEPING["qemu-es-housekeeping"])
         d["steps"][1]["packet"] = "CFE_EVS_HK"
         with self.assertRaises(runner.ScenarioError):
             runner.validate_definition(d)
 
     def test_canonical_hash_ignores_key_order(self):
-        d = runner.load_catalog()["qemu-es-housekeeping"]
+        d = HOUSEKEEPING["qemu-es-housekeeping"]
         self.assertEqual(runner.canonical_hash(d), runner.canonical_hash(dict(reversed(list(d.items())))))
+
+    def test_published_catalog_has_three_ordered_scenarios_shared_by_targets(self):
+        catalog = runner.load_catalog()
+        self.assertEqual(list(catalog), [
+            "cs-crc-key-oracle", "tc-log-photo-traversal", "psp-mm-indirect-write",
+        ])
+        for target in ("CFS-1_QEMU", "CFS-1_BBB"):
+            definitions = [d for d in catalog.values() if target in d["supportedTargets"]]
+            self.assertEqual(list(catalog), [definition["id"] for definition in definitions])
+            self.assertEqual([definition["name"] for definition in definitions], [
+                "01. CS 1바이트 CRC 키 복원", "02. TC 로그 사진 경로 변경", "03. MM 포인터 변경",
+            ])
 
     def test_catalog_agrees_with_bundled_cfs_definition_snapshot(self):
         # Versioned reference definitions make this check work in a standalone

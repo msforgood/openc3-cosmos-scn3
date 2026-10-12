@@ -9,6 +9,9 @@ module ScenarioBootstrap
                 env: { 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil })
     output.puts 'Core init: preparing OpenC3 buckets and stock tools (maximum 900 seconds).'
     runner.call(['/bin/sh', '/openc3/init.sh'], seconds: 900, env: { 'SCENARIO_INIT_PHASE' => 'core' })
+    output.puts 'Core init complete; installing bundled cFS target plugin (maximum 360 seconds).'
+    runner.call([RbConfig.ruby, '/openc3/scenario/install-cfs-plugin.rb'], seconds: 360, termination_grace: 1,
+                env: { 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil, 'OPENC3_LOCAL_MODE' => nil })
     output.puts 'Core init complete; guarded Scenario installation (maximum 900 seconds).'
     runner.call([RbConfig.ruby, '/openc3/scenario/autoinstall.rb'], seconds: 900, termination_grace: 1,
                 env: { 'SCENARIO_INIT_PHASE' => nil, 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil, 'OPENC3_LOCAL_MODE' => nil })

@@ -1,27 +1,27 @@
 <template>
-  <section class="scenario-preview psp-evidence" aria-label="MM indirect write evidence" data-test="psp-evidence">
-    <h2>Indirect payload memory write</h2>
-    <p class="muted small">MM resolves the running pulse module. The direct write to the protected controller is denied; the permitted one-byte pointer edit changes where the pulse app writes.</p>
+  <section class="scenario-preview psp-evidence" aria-label="MM 간접 쓰기 증거" data-test="psp-evidence">
+    <h2>포인터 변경과 cFS 종료</h2>
+    <p class="muted small">PAYLOAD_DATA_APP은 정상적으로 버퍼에 샘플을 기록합니다. MM이 앱 내부 포인터를 보호 페이지 주소로 바꾸면, 다음 기록에서 cFS 프로세스가 SIGSEGV로 종료됩니다. 종료 판정은 비행 TM이 아닌 지상 관측 결과입니다.</p>
     <div class="psp-evidence-grid">
-      <div><h3>MM scope</h3>
-        <p>Pulse module: <code>{{ range || 'Waiting for MM map…' }}</code></p>
-        <p>Pointer slot: <code>{{ hex(map?.pointer_slot) }}</code></p>
-        <p>Protected mode: <code>{{ hex(baseline?.mode_address) }}</code></p>
-        <p :class="denial ? 'evidence-pass' : 'muted'">{{ denial ? 'Direct MM write denied (status 3)' : 'Direct write check pending' }}</p>
+      <div><h3>정상 기록과 MM 범위</h3>
+        <p>cFS PID: <code>{{ baseline?.pid ?? '—' }}</code></p>
+        <p>정상 버퍼: <code>{{ hex(baseline?.buffer_address) }}</code></p>
+        <p>보호 페이지: <code>{{ hex(baseline?.guard_address) }}</code></p>
+        <p>완료된 샘플: <strong>{{ baseline?.sample_count ?? '—' }}</strong></p>
+        <p>MM 허용 영역: <code>{{ range || 'MM map 대기 중…' }}</code></p>
+        <p>포인터 위치: <code>{{ hex(map?.pointer_slot) }}</code></p>
+        <p :class="denial ? 'evidence-pass' : 'muted'">{{ denial ? '모듈 밖 정상 버퍼 직접 MM 쓰기 거부됨 (status 3)' : 'MM 범위 검사 대기 중' }}</p>
       </div>
-      <div><h3>Pointer and write target</h3>
-        <p>Before: <code>{{ hex(read?.pointer_before) }}</code></p>
-        <p>One byte: <code>{{ hexByte(edit?.byte_before) }} → {{ hexByte(edit?.byte_after) }}</code></p>
-        <p>After: <code>{{ hex(verify?.pointer_after) }}</code></p>
-        <p>Pulse target: <code>{{ hex(resume?.pulse_target) }}</code></p>
+      <div><h3>포인터와 쓰기 대상</h3>
+        <p>수정 전: <code>{{ hex(read?.pointer_before) }}</code></p>
+        <p>MM 4바이트 쓰기: <code>{{ hex(edit?.pointer_after) }}</code></p>
+        <p>수정 후: <code>{{ hex(verify?.pointer_after) }}</code></p>
+        <p>재개 후 쓰기 대상: <code>{{ hex(resume?.write_target) }}</code></p>
       </div>
-      <div><h3>Controller result</h3>
-        <p>Mode: <code>{{ baseline?.mode_before ?? '—' }} → {{ fault?.mode_after ?? '—' }}</code></p>
-        <p>Fault count: <strong>{{ fault?.fault_count ?? '—' }}</strong></p>
-        <p>Pulse halt ACK: <strong>{{ fault?.halt_acked === 1 ? 'received' : 'pending' }}</strong></p>
-        <p :class="esExit ? 'evidence-pass' : 'muted'">{{ esExit ? `cFE ES APP_ERROR cleanup · event ${esExit.es_event_id}` : 'cFE ES exit event pending' }}</p>
-        <p :class="survived ? 'evidence-pass' : 'muted'">{{ survived ? 'Pulse app alive in fault-halted state' : 'Pulse survival pending' }}</p>
-        <p class="muted small">The controller reports the mode fault, then cFE ES confirms its error exit. The pulse app remains available for STATUS.</p>
+      <div><h3>cFS 프로세스 실행 결과</h3>
+        <p :class="exit ? 'evidence-pass' : 'muted'">{{ exit ? `${exit.signal_name} · signal ${exit.exit_signal}` : '지상 종료 관측 대기 중' }}</p>
+        <p v-if="exit?.observed_at">종료 관측: <code>{{ exit.observed_at }}</code></p>
+        <p class="muted small">재개 후 cFS가 종료되므로 새 비행 TM은 기대하지 않습니다. Runner는 시작할 때 확인한 동일 프로세스의 종료 기록을 비교합니다.</p>
       </div>
     </div>
   </section>
@@ -31,17 +31,18 @@
 import { computed } from 'vue'
 
 const props = defineProps({ steps: { type: Object, required: true } })
-const baseline = computed(() => props.steps.baseline)
-const map = computed(() => props.steps.map)
-const denial = computed(() => props.steps['deny-direct-write']?.debug_status === 3)
-const read = computed(() => props.steps['read-pointer'])
-const edit = computed(() => props.steps['write-pointer-byte'])
-const verify = computed(() => props.steps['verify-pointer'])
-const resume = computed(() => props.steps.resume)
-const fault = computed(() => props.steps['observe-fault'])
-const esExit = computed(() => props.steps['confirm-es-exit']?.es_event_id === 14 ? props.steps['confirm-es-exit'] : null)
-const survived = computed(() => props.steps['confirm-pulse']?.status === 'succeeded')
-const range = computed(() => map.value?.module_start !== undefined ? `${hex(map.value.module_start)} – ${hex(map.value.module_end)} (end exclusive)` : '')
+const completed = (phase) => props.steps[phase]?.status === 'succeeded' ? props.steps[phase] : null
+const baseline = computed(() => completed('baseline'))
+const map = computed(() => completed('map'))
+const denial = computed(() => completed('deny-direct-write')?.debug_status === 3)
+const read = computed(() => completed('read-pointer'))
+const edit = computed(() => completed('write-pointer'))
+const verify = computed(() => completed('verify-pointer'))
+const resume = computed(() => completed('resume'))
+const exit = computed(() => {
+  const result = completed('confirm-sigsegv')
+  return result?.exit_signal === 11 && result.signal_name === 'SIGSEGV' ? result : null
+})
+const range = computed(() => map.value?.module_start !== undefined ? `${hex(map.value.module_start)} – ${hex(map.value.module_end)} (종료 주소 미포함)` : '')
 function hex(value) { return Number.isSafeInteger(value) ? `0x${value.toString(16).padStart(8, '0')}` : '—' }
-function hexByte(value) { return Number.isInteger(value) ? `0x${value.toString(16).padStart(2, '0')}` : '—' }
 </script>

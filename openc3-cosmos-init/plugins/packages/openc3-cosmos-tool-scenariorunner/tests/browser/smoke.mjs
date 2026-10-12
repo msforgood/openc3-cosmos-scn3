@@ -24,13 +24,13 @@ try {
     { name: 'MISSING', limits: { enabled: true, DEFAULT: fixtureLimits } },
     { name: 'OVERFLOW', limits: { enabled: true, DEFAULT: fixtureLimits } },
   ]
-  const scenario = { schemaVersion: 1, id: 'qemu-es-housekeeping', version: '1.0.0', definition_hash: 'fixture-hash', name: 'QEMU executive services housekeeping',
-    description: 'Request housekeeping once and confirm a newly received packet.', supportedTargets: ['CFS-1_QEMU', 'CFS-2_QEMU', 'CATALOG_ONLY'], timeoutSec: 30,
+  const scenario = { schemaVersion: 1, id: 'fixture-es-housekeeping', version: '1.0.0', definition_hash: 'fixture-hash', name: 'Executive services housekeeping',
+    description: 'Request housekeeping once and confirm a newly received packet.', supportedTargets: ['CFS-1_QEMU', 'CFS-1_BBB'], timeoutSec: 30,
     telemetryItems: [{ packet: 'CFE_ES_HK', item: 'COMMAND_COUNTER' }],
     steps: [{ id: 'request-hk', type: 'command', packet: 'CFE_ES_SEND_HK_CMD', parameters: {}, timeoutSec: 3 },
       { id: 'confirm-hk', type: 'waitTelemetry', packet: 'CFE_ES_HK', item: 'COMMAND_COUNTER', operator: 'gte', value: 0, timeoutSec: 10 }] }
   const events = []
-  const secondScenario = { ...scenario, id: 'qemu-evs-housekeeping', name: 'QEMU event services housekeeping', definition_hash: 'fixture-evs-hash', steps: scenario.steps.map((step) => ({ ...step, packet: step.packet?.replace('CFE_ES', 'CFE_EVS') })) }
+  const secondScenario = { ...scenario, id: 'fixture-evs-housekeeping', name: 'Event services housekeeping', definition_hash: 'fixture-evs-hash', steps: scenario.steps.map((step) => ({ ...step, packet: step.packet?.replace('CFE_ES', 'CFE_EVS') })) }
   const json = (route, value, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(value) })
   await page.routeWebSocket('**/openc3-api/cable?**', (socket) => {
     ws = socket
@@ -59,7 +59,10 @@ try {
       starts++
       const data = route.request().postDataJSON()
       run = { id: 'fixture-run', scope: 'DEFAULT', target: data.target, scenario_id: scenario.id, definition_version: scenario.version, definition_hash: scenario.definition_hash, state: 'running', created_at: new Date().toISOString(), updated_at: new Date().toISOString(), deadline: new Date(Date.now() + 30000).toISOString() }
-      events.push({ id: 1, type: 'step', created_at: new Date().toISOString(), data: { step_id: 'request-hk', status: 'succeeded', commandAccepted: true } })
+      events.push({ id: 1, type: 'command', created_at: new Date().toISOString(), data: {
+        step_id: 'request-hk', packet: 'CFE_ES_SEND_HK_CMD', parameters_json: '{}',
+      } })
+      events.push({ id: 2, type: 'step', created_at: new Date().toISOString(), data: { step_id: 'request-hk', status: 'succeeded', commandAccepted: true } })
       return json(route, run, 201)
     }
     if (path.endsWith('/events')) return json(route, { items: events.filter((event) => event.id > Number(url.searchParams.get('after') || 0)), next_cursor: events.length })
@@ -100,10 +103,10 @@ try {
   })
   await page.goto(`http://127.0.0.1:2931${bundle ? '/tools/scenariorunner' : '/tests/browser/index.html'}`)
   await expect(page.locator('[data-test="start"]')).toBeEnabled()
-  await expect(page.locator('[data-test="communication"]')).toHaveText('Live telemetry')
+  await expect(page.locator('[data-test="communication"]')).toHaveText('실시간 텔레메트리')
   await expect(page.locator('.screen-item')).toContainText('Executive Services Housekeeping')
   await expect(page.locator('.screen-item [data-test="value"] input')).toHaveValue('7')
-  await expect(page.locator('[data-test="item-state"]')).toContainText('No limits')
+  await expect(page.locator('[data-test="item-state"]')).toContainText('Limits 없음')
   await expect(page.locator('[data-test="sample-trend"]')).toBeVisible()
   await expect(page.locator('[data-test="overview-scope"]')).toContainText('CFS-1_QEMU / CFE_ES_HK')
   await expect(page.locator('[data-test="limits-set"]')).toContainText('DEFAULT')
@@ -116,27 +119,26 @@ try {
   await page.locator('.screen-item [data-test="value"] input').press('Shift+F10')
   await expect(page.getByText('Details', { exact: true })).not.toBeVisible()
   checks.push('real VALUE context menu and keyboard context gesture cannot expose mutable Details limits control')
-  await expect(page.locator('[data-test="target-select"] option')).toHaveCount(7)
-  await expect(page.locator('[data-test="target-select"] option')).toHaveText(['Select installed target', 'CFS-1_BBB', 'CFS-1_QEMU', 'CFS-2_QEMU', 'NOT_SUPPORTED', 'SCENARIO_RUNNER', 'SYSTEM'])
+  await expect(page.locator('[data-test="target-select"] option')).toHaveCount(3)
+  await expect(page.locator('[data-test="target-select"] option')).toHaveText(['설치된 대상을 선택하세요', 'CFS-1_QEMU', 'CFS-1_BBB'])
   await expect(page.locator('[data-test="limits-events"]')).toContainText('COMMAND_COUNTER')
   await expect(page.locator('[data-test="limits-events"]')).not.toContainText('DO_NOT_SHOW')
   const grid = await page.locator('.runner-grid').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').map(parseFloat))
   if (Math.abs(grid[0] / (grid[0] + grid[1]) - .45) > .005) throw new Error('Expected 45:55 panel split')
-  checks.push('real Openc3Screen renders current telemetry; complete deduplicated installed targets without catalog-only names; 45:55 layout; selected-target limits filter')
+  checks.push('real Openc3Screen renders current telemetry; only installed QEMU/BBB targets shown; 45:55 layout; selected-target limits filter')
   await page.locator('[data-test="target-select"]').selectOption('CFS-1_BBB')
-  await expect(page.locator('[data-test="no-scenarios"]')).toHaveText('No scenarios available for this target')
-  await expect(page.locator('[data-test="scenario-select"]')).toBeDisabled()
-  await expect(page.locator('[data-test="start"]')).toBeDisabled()
+  await expect(page.locator('[data-test="scenario-select"] option')).toHaveText([scenario.name, secondScenario.name])
+  await expect(page.locator('[data-test="start"]')).toBeEnabled()
   await expect(page.locator('.telemetry-panel h2').first()).toHaveText('CFS-1_BBB · HK / TM')
   await expect(page.locator('[data-test="overview-scope"]')).toContainText('CFS-1_BBB / CFE_ES_HK')
   await expect(page.locator('.screen-item [data-test="value"] input')).toHaveValue('7')
-  await expect(page.locator('[data-test="communication"]')).toHaveText('Live telemetry')
-  if (starts !== 0) throw new Error('Unsupported target selection triggered a start')
+  await expect(page.locator('[data-test="communication"]')).toHaveText('실시간 텔레메트리')
+  if (starts !== 0) throw new Error('Target selection triggered a start')
   await page.locator('[data-test="target-select"]').selectOption('CFS-1_QEMU')
   await expect(page.locator('[data-test="start"]')).toBeEnabled()
   await expect(page.locator('[data-test="scenario-select"] option')).toHaveCount(2)
   await expect(page.locator('[data-test="overview-scope"]')).toContainText('CFS-1_QEMU / CFE_ES_HK')
-  checks.push('unsupported installed BBB target retains real read-only telemetry with no scenarios and Start disabled; returning to supported QEMU restores scenario selection')
+  checks.push('shared catalog scenarios appear for BBB and QEMU; target selection leaves telemetry scoped and does not start a run')
   await page.locator('[data-test="screen-select"]').selectOption('ACTIVE')
   await expect(page.getByText('BUTTON is not a passive HK widget', { exact: false })).toBeVisible()
   await expect(page.locator('.screen-item')).toHaveCount(0)
@@ -146,31 +148,42 @@ try {
   checks.push('command-bearing installed screen refused before mounting; no command RPC available in fixture')
   await page.locator('[data-test="screen-select"]').selectOption('LIMITS_DEMO')
   await expect(page.locator('[data-test="overview-row"]')).toHaveCount(6)
-  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'BUS_VOLTAGE' })).toContainText('Caution')
-  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'OPERATING_MODE' })).toContainText('Alarm')
-  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'DISABLED' })).toContainText('Limits disabled')
-  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'MISSING' })).toContainText('No data')
-  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'OVERFLOW' })).toContainText('Above scale · pointer clamped')
+  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'BUS_VOLTAGE' })).toContainText('주의')
+  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'OPERATING_MODE' })).toContainText('경보')
+  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'DISABLED' })).toContainText('Limits 비활성')
+  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'MISSING' })).toContainText('데이터 없음')
+  await expect(page.locator('[data-test="overview-row"]').filter({ hasText: 'OVERFLOW' })).toContainText('눈금 위 · 표시 위치를 눈금 끝에 고정함')
   await expect(page.locator('.screen-item')).toContainText('Synthetic limits fixture')
   await page.screenshot({ path: `${evidenceDir}/telemetry-limits-fixture.png`, fullPage: true })
   checks.push('synthetic actual-limit gauge, enum alarm, explicit disabled/missing states and clamped overflow; packet screen remains expanded')
   await page.locator('[data-test="screen-select"]').selectOption('CFE_ES_HK')
-  await expect(page.locator('[data-test="item-state"]')).toContainText('No limits')
+  await expect(page.locator('[data-test="item-state"]')).toContainText('Limits 없음')
+  await expect(page.locator('[data-test="step-command-plan-request-hk"]')).toContainText('Planned TC')
+  await expect(page.locator('[data-test="step-command-plan-request-hk"]')).toContainText('CFE_ES_SEND_HK_CMD')
+  await expect(page.locator('[data-test="step-command-plan-request-hk"] pre')).toHaveText('{}')
+  await expect(page.locator('[data-test="step-command-plan-confirm-hk"]')).toContainText('No TC')
+  await expect(page.locator('[data-test="step-result-request-hk"]')).toHaveCount(0)
+  checks.push('planned packet and parameters visible before start; telemetry-only step marked No TC')
   await page.locator('[data-test="start"]').click()
   await expect(page.locator('[data-test="run-status"]')).toHaveText('Running')
+  await expect(page.locator('[data-test="step-result-request-hk"]')).toContainText('Execution result')
+  await expect(page.locator('[data-test="step-result-request-hk"] pre')).toHaveText('Command accepted')
+  await expect(page.locator('[data-test="steps"]')).not.toContainText('Accepted TC')
+  await expect(page.locator('[data-test="logs"]')).toContainText('1단계 · CFE_ES_SEND_HK_CMD · {}')
+  await expect(page.locator('[data-test="logs"]')).not.toContainText('request-hk ·')
   await expect(page.locator('[data-test="target-select"]')).toBeDisabled()
   await expect(page.locator('[data-test="start"]')).toBeDisabled()
   if (starts !== 1) throw new Error('Duplicate start')
-  checks.push('start request and target/duplicate-start locks')
+  checks.push('start request, execution result in step, exact accepted TC values in run log, and target/duplicate-start locks')
   run = { ...run, state: 'waiting', prompt: { prompt_id: 'prompt-1', status: 'pending', message: 'Confirm fixture continuation', choices: ['continue', 'cancel'], deadline: new Date(Date.now() + 30000).toISOString() } }
   await expect(page.getByText('Confirm fixture continuation')).toBeVisible()
   await page.getByRole('button', { name: 'continue', exact: true }).click()
   await expect(page.getByText('Confirm fixture continuation')).not.toBeVisible()
   checks.push('real Vuetify managed prompt displays and submits offered choice')
   frozenReceipt = true; receipt = Date.now() / 1000 - 30
-  await expect(page.locator('[data-test="communication"]')).toHaveText('Telemetry delayed')
+  await expect(page.locator('[data-test="communication"]')).toHaveText('텔레메트리 지연')
   await expect(page.locator('.screen-stale')).toBeVisible()
-  await expect(page.locator('[data-test="item-state"]')).toContainText('Stale')
+  await expect(page.locator('[data-test="item-state"]')).toContainText('오래됨')
   await expect(page.locator('[data-test="run-status"]')).toHaveText('Running')
   checks.push('stale packet timestamp overrides green display while run state stays independent')
   await page.locator('[data-test="stop"]').click()
@@ -183,11 +196,11 @@ try {
   await expect(page.getByText('Command accepted', { exact: true })).toBeVisible()
   await page.locator('[data-test="scenario-select"]').selectOption(secondScenario.id)
   await expect(page.getByText('Command accepted', { exact: true })).not.toBeVisible()
-  await expect(page.locator('label[for="run-progress"]')).toHaveText('0 / 2 steps complete')
+  await expect(page.locator('label[for="run-progress"]')).toHaveText('0 / 2단계 완료')
   await expect(page.locator('[data-test="run-status"]')).toHaveText('Ready')
   checks.push('switching scenario after terminal run clears prior step confirmations and completed count')
   await page.locator('[data-test="scenario-select"]').selectOption(scenario.id)
-  await expect(page.locator('[data-test="item-state"]')).toContainText('Stale')
+  await expect(page.locator('[data-test="item-state"]')).toContainText('오래됨')
   await mkdir(evidenceDir, { recursive: true })
   await page.screenshot({ path: `${evidenceDir}/${bundle ? 'bundle' : 'browser'}-desktop.png`, fullPage: true })
   await page.setViewportSize({ width: 760, height: 1100 })

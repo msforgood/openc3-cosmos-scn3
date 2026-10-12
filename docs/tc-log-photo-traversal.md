@@ -1,5 +1,7 @@
 # TC 로그 사진 파일명 시나리오: OpenC3
 
+이 문서는 2026-10-07 독립 브랜치와 당시 실장비 검증을 기록한다. 현재 세 시나리오 통합 배포와 버전은 [통합 안내](all-three-scenarios.md)를 따른다.
+
 이 브랜치 `scenario/tc-log-photo-traversal`은 OpenC3 6.10.1의 Scenario Runner 1.0.9에 QEMU/BBB 절차를 추가한다. 비행 소프트웨어는 같은 이름의 cFS 브랜치, TC/TM 정의는 같은 이름의 `cfs-cosmos-plugin-bbb` 브랜치에서 빌드한다. 각 브랜치는 독립된 체크아웃이다.
 
 ## 설치 순서

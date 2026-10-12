@@ -6,11 +6,12 @@ require_relative 'store'
 module Scenario
   class Service
     PROCEDURE = 'SCENARIO_RUNNER/procedures/run_scenario.py'
+    MANUAL_TIMEOUT_SEC = 1800
     TERMINAL = Store::TERMINAL
     RUNNER_TERMINAL = %w[completed completed_errors stopped crashed killed].freeze
-    PUBLIC_FIELDS = %w[id scope target scenario_id definition_version definition_hash request_id state script_id created_at updated_at deadline stop_requested termination_confirmed prompt result error].freeze
-    CALLBACK_TYPES = %w[started step log prompt result].freeze
-    DATA_KEYS = %w[step_id status commandAccepted telemetryConfirmed authenticated packet item value received_at message prompt_id choices deadline level file_index file_size before_text before_hex after_hex photo_bytes active_index total_logged write_errors filename kick_address mode_address mode_before mode_after pulse_count module_start module_end pointer_slot denied_address debug_status pointer_before pointer_after byte_before byte_after pulse_target fault_count halt_acked es_event_id es_event_message].freeze
+    PUBLIC_FIELDS = %w[id scope target scenario_id definition_version definition_hash request_id state script_id created_at updated_at deadline stop_requested termination_confirmed prompt result error execution_mode].freeze
+    CALLBACK_TYPES = %w[started step command log prompt result].freeze
+    DATA_KEYS = %w[step_id status commandAccepted telemetryConfirmed authenticated packet parameters_json item value received_at message prompt_id choices deadline level file_index file_size before_text before_hex after_hex photo_bytes active_index total_logged write_errors filename module_start module_end pointer_slot denied_address debug_status pointer_before pointer_after buffer_address guard_address sample_count write_target process_instance pid exit_signal signal_name observed_at].freeze
 
     def initialize(store:, catalog:, backend:, auth:, clock: -> { Time.now.utc }, max_active: 4)
       @store, @catalog, @backend, @auth, @clock, @max_active = store, catalog, backend, auth, clock, max_active
@@ -61,33 +62,20 @@ module Scenario
       end
       d = request_definition!(input)
       authorize!(scope, 'SCENARIO_RUNNER', token, 'script_run')
-      d['steps'].each do |step|
-        authorize!(scope, target, token, 'cmd', step['packet']) if step['type'] == 'command'
-        authorize!(scope, target, token, 'tlm', step['packet']) if step['type'] == 'waitTelemetry'
-        authorize!(scope, target, token, 'cmd', 'CS_CMD_ONE_SHOT') if step['type'] == 'crcByte'
-      end
-      if d['steps'].any? { |step| step['type'] == 'tcLogPhase' }
-        %w[CI_LOG_STATUS_CMD CI_LOG_SEAL_CMD CI_LOG_READ_CMD TC_CAMERA_CAPTURE_CMD CFE_ES_SEND_HK_CMD].each do |packet|
-          authorize!(scope, target, token, 'cmd', packet)
-        end
-      end
-      if d['steps'].any? { |step| step['type'] == 'pspPhase' }
-        %w[MM_CMD_DEBUG_MAP MM_CMD_DEBUG_READ MM_CMD_DEBUG_WRITE PAYLOAD_PULSE_PAUSE_CMD PAYLOAD_PULSE_RESUME_CMD PAYLOAD_PULSE_STATUS_CMD PAYLOAD_CTRL_STATUS_CMD].each do |packet|
-          authorize!(scope, target, token, 'cmd', packet)
-        end
-        authorize!(scope, target, token, 'tlm', 'CFE_EVS_LONG_EVENT_MSG')
-      end
-      d['telemetryItems'].each { |t| authorize!(scope, target, token, 'tlm', t['packet']) }
+      authorize_definition!(scope, target, token, d)
       @backend.validate_definition!(scope, target, d)
       time = timestamp
+      mode = execution_mode(input)
       run = {
         'id' => SecureRandom.uuid, 'scope' => scope, 'target' => target, 'request_id' => key,
         'fingerprint' => fingerprint, 'scenario_id' => d['id'], 'definition_version' => d['version'],
         'definition_hash' => Canonical.hash(d), 'definition' => d, 'state' => 'launching',
         'script_id' => nil, 'created_at' => time, 'updated_at' => time,
-        'deadline' => (now + d['timeoutSec']).iso8601(6), 'stop_requested' => false,
+        'deadline' => (now + (mode == 'manual' ? MANUAL_TIMEOUT_SEC : d['timeoutSec'])).iso8601(6), 'stop_requested' => false,
         'termination_confirmed' => false, 'prompt' => nil, 'result' => nil, 'error' => nil,
-        'stop_attempts' => 0, 'last_stop_at' => nil, 'launch_pending' => true
+        'stop_attempts' => 0, 'last_stop_at' => nil, 'launch_pending' => true,
+        'execution_mode' => mode, 'next_step_index' => 0,
+        'manual_step_running' => false, 'manual_step_failed' => false
       }
       inserted = @store.transaction do |s|
         raced = s.by_request(scope, key)
@@ -158,7 +146,9 @@ module Scenario
           'script_id' => nil, 'created_at' => time, 'updated_at' => time, 'deadline' => time,
           'stop_requested' => false, 'termination_confirmed' => true, 'launch_pending' => false,
           'prompt' => nil, 'result' => nil, 'error' => 'request_not_accepted',
-          'stop_attempts' => 0, 'last_stop_at' => nil
+          'stop_attempts' => 0, 'last_stop_at' => nil,
+          'execution_mode' => execution_mode(input), 'next_step_index' => 0,
+          'manual_step_running' => false, 'manual_step_failed' => false
         }
         s.insert_failed_request(run)
         s.event(run['id'], 'state', { 'state' => 'failed', 'error' => run['error'] }, time: time)
@@ -197,7 +187,9 @@ module Scenario
     end
 
     def answer(id, scope:, token:, prompt_id:, answer:)
-      authorized_run(id, scope, token, 'script_run')
+      authorized = authorized_run(id, scope, token, 'script_run')
+      authorize_definition!(scope, authorized['target'], token, authorized['definition']) if
+        authorized.fetch('execution_mode', 'automatic') == 'manual' && answer == 'continue'
       run = @store.transaction do |s|
         r = s.get(id)
         p = r['prompt']
@@ -232,6 +224,20 @@ module Scenario
           raise Error.new('invalid_event_data')
         end
       end
+      if type == 'command'
+        unless data.keys.sort == %w[packet parameters_json step_id] &&
+               data['step_id'].is_a?(String) && data['packet'].is_a?(String) &&
+               data['parameters_json'].is_a?(String) &&
+               run.dig('definition', 'steps')&.any? { |step| step['id'] == data['step_id'] }
+          raise Error.new('invalid_command_event')
+        end
+        begin
+          parameters = JSON.parse(data['parameters_json'])
+          raise Error.new('invalid_command_event') unless parameters.is_a?(Hash)
+        rescue JSON::ParserError
+          raise Error.new('invalid_command_event')
+        end
+      end
       fingerprint = Canonical.hash(payload.reject { |k, _| k == 'scope' }.merge('data' => data))
       replay = @store.transaction { |s| s.event_replay(id, event_id, fingerprint) }
       return context_for(@store.transaction { |s| s.get(id) }) if replay
@@ -249,10 +255,40 @@ module Scenario
           install_prompt!(r, data)
         elsif type == 'result'
           raise Error.new('invalid_result') unless %w[succeeded failed].include?(data['status'])
+          if r.fetch('execution_mode', 'automatic') == 'manual' && data['status'] == 'succeeded' &&
+             (r.fetch('next_step_index', 0) != r['definition']['steps'].length || r['manual_step_failed'])
+            raise Error.new('incomplete_steps')
+          end
           raise Error.new('result_conflict', nil, 409) if r['result'] && r['result'] != data
           r['result'] = data
         elsif type == 'step'
           raise Error.new('invalid_step') unless r['definition']['steps'].any? { |step| step['id'] == data['step_id'] }
+          if r.fetch('execution_mode', 'automatic') == 'manual'
+            expected = r['definition']['steps'][r.fetch('next_step_index', 0)]
+            raise Error.new('invalid_step') unless expected && expected['id'] == data['step_id'] &&
+                                                   %w[running succeeded failed].include?(data['status'])
+            case data['status']
+            when 'running'
+              if r.fetch('next_step_index', 0).positive?
+                prompt = r['prompt']
+                raise Error.new('step_not_authorized') unless prompt && prompt['prompt_id'] == expected['id'] &&
+                                                            prompt['status'] == 'answered' && prompt['answer'] == 'continue'
+              end
+              raise Error.new('invalid_step') if r['manual_step_running'] || r['manual_step_failed']
+              r['manual_step_running'] = true
+            when 'succeeded'
+              raise Error.new('invalid_step') unless r['manual_step_running'] && !r['manual_step_failed']
+              r['next_step_index'] += 1
+              r['manual_step_running'] = false
+            when 'failed'
+              r['manual_step_running'] = false
+              r['manual_step_failed'] = true
+            end
+          end
+        elsif type == 'command' && r.fetch('execution_mode', 'automatic') == 'manual'
+          expected = r['definition']['steps'][r.fetch('next_step_index', 0)]
+          raise Error.new('invalid_command_event') unless expected && expected['id'] == data['step_id'] &&
+                                                         r['manual_step_running']
         end
         s.event(id, type, data, time: timestamp, event_id: event_id, fingerprint: fingerprint)
         r['updated_at'] = timestamp
@@ -353,8 +389,9 @@ module Scenario
 
     def request_identity!(input, token, request_key)
       raise Error.new('invalid_request') unless input.is_a?(Hash)
-      allowed = %w[scope scenario_id definition_version definition_hash target request_id]
+      allowed = %w[scope scenario_id definition_version definition_hash target request_id execution_mode]
       raise Error.new('unexpected_fields') unless (input.keys - allowed).empty?
+      execution_mode(input)
       scope, target = input.values_at('scope', 'target')
       raise Error.new('invalid_target') unless target.is_a?(String) && Catalog::NAME.match?(target)
       authorize!(scope, target, token, 'script_run')
@@ -375,6 +412,30 @@ module Scenario
       d
     end
 
+    def execution_mode(input)
+      raise Error.new('invalid_execution_mode') if input.key?('execution_mode') && input['execution_mode'] != 'manual'
+      input.fetch('execution_mode', 'automatic')
+    end
+
+    def authorize_definition!(scope, target, token, definition)
+      definition['steps'].each do |step|
+        authorize!(scope, target, token, 'cmd', step['packet']) if step['type'] == 'command'
+        authorize!(scope, target, token, 'tlm', step['packet']) if step['type'] == 'waitTelemetry'
+        authorize!(scope, target, token, 'cmd', 'CS_CMD_ONE_SHOT') if step['type'] == 'crcByte'
+      end
+      if definition['steps'].any? { |step| step['type'] == 'tcLogPhase' }
+        %w[CI_LOG_STATUS_CMD CI_LOG_SEAL_CMD CI_LOG_READ_CMD TC_CAMERA_CAPTURE_CMD CFE_ES_SEND_HK_CMD].each do |packet|
+          authorize!(scope, target, token, 'cmd', packet)
+        end
+      end
+      if definition['steps'].any? { |step| step['type'] == 'pspPhase' }
+        %w[MM_CMD_DEBUG_MAP MM_CMD_DEBUG_READ MM_CMD_DEBUG_WRITE PAYLOAD_DATA_PAUSE_CMD PAYLOAD_DATA_RESUME_CMD PAYLOAD_DATA_STATUS_CMD].each do |packet|
+          authorize!(scope, target, token, 'cmd', packet)
+        end
+      end
+      definition['telemetryItems'].each { |item| authorize!(scope, target, token, 'tlm', item['packet']) }
+    end
+
     def permitted?(scope, target, token)
       authorize!(scope, target, token)
       true
@@ -390,7 +451,8 @@ module Scenario
     def context_for(run)
       { 'run_id' => run['id'], 'scope' => run['scope'], 'target' => run['target'],
         'definition' => run['definition'], 'definition_hash' => run['definition_hash'],
-        'stop_requested' => run['stop_requested'], 'deadline' => run['deadline'], 'prompt' => run['prompt'] }
+        'stop_requested' => run['stop_requested'], 'deadline' => run['deadline'], 'prompt' => run['prompt'],
+        'execution_mode' => run.fetch('execution_mode', 'automatic') }
     end
 
     def authorized_run(id, scope, token, permission = 'script_view')
@@ -481,12 +543,21 @@ module Scenario
 
     def install_prompt!(run, data)
       raise Error.new('prompt_pending', nil, 409) if run.dig('prompt', 'status') == 'pending'
+      if run.fetch('execution_mode', 'automatic') == 'manual'
+        next_index = run.fetch('next_step_index', 0)
+        expected = run['definition']['steps'][next_index]
+        unless next_index.positive? && expected && data['prompt_id'] == expected['id'] &&
+               data['choices'] == ['continue'] && !run['manual_step_running'] && !run['manual_step_failed']
+          raise Error.new('invalid_step_prompt')
+        end
+      end
       check = data['prompt_id'].is_a?(String) && Catalog::ID.match?(data['prompt_id']) &&
               data['message'].is_a?(String) && data['choices'].is_a?(Array) && data['choices'].size.between?(1, 8) &&
               data['choices'].all? { |c| c.is_a?(String) && Catalog::ID.match?(c) }
       raise Error.new('invalid_prompt') unless check
       deadline = Time.iso8601(data['deadline']) rescue nil
-      raise Error.new('invalid_prompt_deadline') unless deadline && deadline > now && deadline <= now + 120 && deadline <= Time.iso8601(run['deadline'])
+      prompt_limit = run.fetch('execution_mode', 'automatic') == 'manual' ? Time.iso8601(run['deadline']) : now + 120
+      raise Error.new('invalid_prompt_deadline') unless deadline && deadline > now && deadline <= prompt_limit && deadline <= Time.iso8601(run['deadline'])
       run['prompt'] = data.slice('prompt_id', 'message', 'choices', 'deadline').merge('status' => 'pending', 'answer' => nil)
       run['state'] = 'waiting'
     end

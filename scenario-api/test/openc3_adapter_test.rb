@@ -21,13 +21,37 @@ class OpenC3AdapterTest < ScenarioTest
       stream_id = name == oracle['command'] ? oracle['streamId'] : @policy['commands'].fetch(name)['streamId']
       defaults = @policy['headerDefaults'].merge('CCSDS_STREAMID' => stream_id)
       defaults['CCSDS_FC'] = oracle['functionCode'] if name == oracle['command']
+      psp_commands = {
+        'MM_CMD_DEBUG_MAP' => [13, { 'REQUEST_ID' => 32 }],
+        'MM_CMD_DEBUG_READ' => [14, { 'REQUEST_ID' => 32, 'WIDTH_BYTES' => 32, 'ADDRESS' => 64 }],
+        'MM_CMD_DEBUG_WRITE' => [15, { 'REQUEST_ID' => 32, 'WIDTH_BYTES' => 32, 'ADDRESS' => 64,
+                                        'VALUE' => 32, 'RESERVED' => 32 }],
+        'PAYLOAD_DATA_PAUSE_CMD' => [2, {}],
+        'PAYLOAD_DATA_RESUME_CMD' => [3, {}],
+        'PAYLOAD_DATA_STATUS_CMD' => [4, {}]
+      }
+      defaults['CCSDS_FC'] = psp_commands[name][0] if psp_commands.key?(name)
       items = defaults.map { |key, value| { 'name' => key, 'default' => value, 'id_value' => value, 'data_type' => 'UINT' } }
       items += %w[ADDRESS SIZE MAX_BYTES_PER_CYCLE].map { |key| { 'name' => key, 'data_type' => 'UINT', 'bit_size' => 32 } } if name == oracle['command']
+      items += psp_commands[name][1].map { |key, size| { 'name' => key, 'data_type' => 'UINT', 'bit_size' => size } } if psp_commands.key?(name)
       items += OpenC3::Packet::RESERVED_ITEM_NAMES.map { |key| { 'name' => key, 'data_type' => 'DERIVED' } }
     else
       items = name == oracle['xbandPacket'] ? [] : [{ 'name' => 'COMMAND_COUNTER', 'data_type' => 'UINT', 'bit_size' => 8 }]
       items += @policy['telemetryTypes'].filter_map do |field, width|
         { 'name' => field.split('.', 2)[1], 'data_type' => 'UINT', 'bit_size' => width } if field.start_with?("#{name}.")
+      end
+      psp_telemetry = {
+        'MM_DEBUG' => { 'REQUEST_ID' => 32, 'OPERATION' => 32, 'STATUS' => 32,
+                        'WIDTH_BYTES' => 32, 'MODULE_START' => 64, 'MODULE_END' => 64,
+                        'POINTER_SLOT' => 64, 'ADDRESS' => 64, 'VALUE' => 64 },
+        'PAYLOAD_DATA_STATE' => { 'STATE' => 8, 'LAST_SAMPLE' => 8, 'RESERVED' => 16,
+                                  'SAMPLE_COUNT' => 32, 'POINTER_SLOT' => 32,
+                                  'WRITE_TARGET_ADDRESS' => 32, 'BUFFER_ADDRESS' => 32,
+                                  'GUARD_ADDRESS' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32 }
+      }
+      if psp_telemetry.key?(name)
+        items.reject! { |item| psp_telemetry[name].key?(item['name']) }
+        items += psp_telemetry[name].map { |key, size| { 'name' => key, 'data_type' => 'UINT', 'bit_size' => size } }
       end
       if name == oracle['xbandPacket']
         items.find { |item| item['name'] == 'MAGIC' }['id_value'] = oracle['xbandMagic']
@@ -54,7 +78,7 @@ class OpenC3AdapterTest < ScenarioTest
   end
 
   def test_bbb_crc_oracle_validates_independent_xband_target_before_launch
-    definition = @catalog.get('bbb-cs-crc-key-oracle')
+    definition = @catalog.get('cs-crc-key-oracle')
     OpenC3::TargetModel.stub(:packet, method(:packet)) do
       OpenC3::TargetFile.stub(:body, method(:target_file)) do
         assert @adapter.validate_definition!('DEFAULT', 'CFS-1_BBB', definition)
@@ -62,8 +86,19 @@ class OpenC3AdapterTest < ScenarioTest
     end
   end
 
+  def test_psp_data_app_packet_shapes_validate_for_qemu_and_bbb
+    %w[CFS-1_QEMU CFS-1_BBB].each do |target|
+      definition = @catalog.get(@policy.fetch('pspIndirectWrite').fetch('scenarioId'))
+      OpenC3::TargetModel.stub(:packet, method(:packet)) do
+        OpenC3::TargetFile.stub(:body, method(:target_file)) do
+          assert @adapter.validate_definition!('DEFAULT', target, definition)
+        end
+      end
+    end
+  end
+
   def test_wrong_crc_function_code_is_rejected_before_launch
-    definition = @catalog.get('qemu-cs-crc-key-oracle')
+    definition = @catalog.get('cs-crc-key-oracle')
     changed = lambda do |target, name, **args|
       value = packet(target, name, **args)
       if name == @policy.dig('crcKeyOracle', 'command') && args[:type] == :CMD
