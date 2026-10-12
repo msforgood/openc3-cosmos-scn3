@@ -1,6 +1,7 @@
 import copy
 from datetime import datetime, timezone
 import importlib.util
+import json
 from pathlib import Path
 import sys
 import unittest
@@ -99,12 +100,12 @@ class Management:
     run_id = "test_run"
     scope = "DEFAULT"
 
-    def __init__(self, definition, clock):
+    def __init__(self, definition, clock, target="CFS-1_QEMU"):
         self.events = []
         self.context_data = {
-            "run_id": self.run_id, "scope": self.scope, "target": definition["supportedTargets"][0],
+            "run_id": self.run_id, "scope": self.scope, "target": target,
             "definition": definition, "definition_hash": runner.canonical_hash(definition),
-            "stop_requested": False, "prompt": None,
+            "stop_requested": False, "prompt": None, "execution_mode": "automatic",
             "deadline": datetime.fromtimestamp(clock.now + 120, timezone.utc).isoformat(),
         }
 
@@ -119,13 +120,13 @@ class Management:
 class OracleTests(unittest.TestCase):
     def setUp(self):
         self.catalog = runner.load_catalog()
-        self.definition = self.catalog["qemu-cs-crc-key-oracle"]
+        self.definition = self.catalog["cs-crc-key-oracle"]
         self.clock = Clock()
 
-    def engine(self, stale=False, scenario_id="qemu-cs-crc-key-oracle", **adapter_options):
-        definition = self.catalog[scenario_id]
+    def engine(self, stale=False, target="CFS-1_QEMU", **adapter_options):
+        definition = self.definition
         adapter = Adapter(self.clock, stale=stale, **adapter_options)
-        management = Management(definition, self.clock)
+        management = Management(definition, self.clock, target=target)
         engine = runner.ScenarioRunner(adapter, management, self.catalog,
                                        runner.canonical_hash(definition),
                                        monotonic=lambda: self.clock.now,
@@ -134,11 +135,10 @@ class OracleTests(unittest.TestCase):
         return engine, adapter, management
 
     def test_16_one_byte_commands_recover_key(self):
-        for scenario_id, target in (("qemu-cs-crc-key-oracle", "CFS-1_QEMU"),
-                                    ("bbb-cs-crc-key-oracle", "CFS-1_BBB")):
+        for target in ("CFS-1_QEMU", "CFS-1_BBB"):
             with self.subTest(target=target):
                 self.clock = Clock()
-                engine, adapter, management = self.engine(scenario_id=scenario_id)
+                engine, adapter, management = self.engine(target=target)
                 with patch.object(runner, "decode_xband_frame", return_value={
                     "sequence": 1, "flag": "flag{crc_oracle}"}) as decode:
                     self.assertEqual(engine.run()["status"], "succeeded")
@@ -148,6 +148,13 @@ class OracleTests(unittest.TestCase):
                                  list(range(0x100000, 0x100010)))
                 self.assertTrue(all(command["SIZE"] == command["MAX_BYTES_PER_CYCLE"] == 1
                                     for command in adapter.sent))
+                sent_events = [data for kind, data in management.events if kind == "command"]
+                self.assertEqual(len(sent_events), 16)
+                self.assertEqual([data["step_id"] for data in sent_events],
+                                 [f"recover-byte-{offset:02d}" for offset in range(16)])
+                self.assertTrue(all(data["packet"] == "CS_CMD_ONE_SHOT" for data in sent_events))
+                self.assertEqual([json.loads(data["parameters_json"]) for data in sent_events],
+                                 adapter.sent)
                 self.assertEqual(management.events[-1][1]["message"],
                                  f"Recovered X-band lab key: {KEY.hex()}")
                 verified = [data for kind, data in management.events if kind == "step" and
@@ -155,9 +162,9 @@ class OracleTests(unittest.TestCase):
                 self.assertEqual(verified[0]["authenticated"], True)
                 self.assertIn("decrypted flag: flag{crc_oracle}", verified[0]["message"])
 
-    def test_oracle_scenario_cannot_switch_target(self):
+    def test_oracle_scenario_rejects_unlisted_target(self):
         engine, adapter, management = self.engine()
-        management.context_data["target"] = "CFS-1_BBB"
+        management.context_data["target"] = "OTHER"
         with self.assertRaisesRegex(runner.ScenarioError, "invalid_target"):
             engine.run()
         self.assertEqual(adapter.sent, [])

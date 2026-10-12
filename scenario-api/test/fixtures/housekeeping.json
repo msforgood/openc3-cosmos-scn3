@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "qemu-es-housekeeping",
+  "version": "1.0.0",
+  "name": "QEMU executive services housekeeping",
+  "description": "Request CFE_ES housekeeping once and confirm a newly received housekeeping packet. A fresh packet confirms telemetry reception, not exclusive attribution to this request.",
+  "supportedTargets": [
+    "CFS-1_QEMU"
+  ],
+  "timeoutSec": 30,
+  "steps": [
+    {
+      "id": "request-hk",
+      "type": "command",
+      "packet": "CFE_ES_SEND_HK_CMD",
+      "parameters": {},
+      "timeoutSec": 3
+    },
+    {
+      "id": "confirm-hk",
+      "type": "waitTelemetry",
+      "packet": "CFE_ES_HK",
+      "item": "COMMAND_COUNTER",
+      "operator": "gte",
+      "value": 0,
+      "timeoutSec": 10,
+      "pollIntervalSec": 0.5
+    }
+  ],
+  "telemetryItems": [
+    {
+      "packet": "CFE_ES_HK",
+      "item": "COMMAND_COUNTER"
+    }
+  ],
+  "successCriteria": {
+    "type": "allStepsSucceeded",
+    "requireFreshTelemetry": true
+  }
+}

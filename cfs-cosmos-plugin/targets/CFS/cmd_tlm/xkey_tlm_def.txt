@@ -1,0 +1,9 @@
+<%= cfs_tlm_hdr(target_name, 'XKEY_HK', 'X-band key app housekeeping') %>
+<% if $cfs_globals_mem_addr_size == 64 %>
+    APPEND_ITEM KEY_ADDRESS          64 UINT "Lab key RAM address"
+<% else %>
+    APPEND_ITEM KEY_ADDRESS          32 UINT "Lab key RAM address"
+<% end %>
+    APPEND_ITEM KEY_LENGTH           32 UINT "Lab key byte length"
+    APPEND_ITEM CHANNEL_READY        32 UINT "X-band downlink sender ready"
+    APPEND_ITEM FRAMES_SENT          32 UINT "X-band frames sent"

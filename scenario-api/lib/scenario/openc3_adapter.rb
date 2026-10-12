@@ -157,7 +157,7 @@ module Scenario
 
     def validate_tc_log(scope, target)
       policy = @policy.fetch('tcLogTraversal')
-      raise Error.new('unsupported_target') unless policy.fetch('scenarioIds').key?(target)
+      raise Error.new('unsupported_target') unless @policy.fetch('allowedTargets').include?(target)
       command_fields = {
         'CI_LOG_STATUS_CMD' => [2, {'REQUEST_ID' => ['UINT', 16], 'RESERVED' => ['UINT', 16]}],
         'CI_LOG_SEAL_CMD' => [3, {'REQUEST_ID' => ['UINT', 16], 'RESERVED' => ['UINT', 16]}],
@@ -202,16 +202,15 @@ module Scenario
 
     def validate_psp(scope, target)
       policy = @policy.fetch('pspIndirectWrite')
-      raise Error.new('unsupported_target') unless policy.fetch('scenarioIds').key?(target)
+      raise Error.new('unsupported_target') unless @policy.fetch('allowedTargets').include?(target)
       command_fields = {
         'MM_CMD_DEBUG_MAP' => [13, {'REQUEST_ID' => ['UINT', 32]}],
         'MM_CMD_DEBUG_READ' => [14, {'REQUEST_ID' => ['UINT', 32], 'WIDTH_BYTES' => ['UINT', 32], 'ADDRESS' => ['UINT', 64]}],
         'MM_CMD_DEBUG_WRITE' => [15, {'REQUEST_ID' => ['UINT', 32], 'WIDTH_BYTES' => ['UINT', 32],
                                      'ADDRESS' => ['UINT', 64], 'VALUE' => ['UINT', 32], 'RESERVED' => ['UINT', 32]}],
-        'PAYLOAD_PULSE_PAUSE_CMD' => [2, {}],
-        'PAYLOAD_PULSE_RESUME_CMD' => [3, {}],
-        'PAYLOAD_PULSE_STATUS_CMD' => [4, {}],
-        'PAYLOAD_CTRL_STATUS_CMD' => [2, {}]
+        'PAYLOAD_DATA_PAUSE_CMD' => [2, {}],
+        'PAYLOAD_DATA_RESUME_CMD' => [3, {}],
+        'PAYLOAD_DATA_STATUS_CMD' => [4, {}]
       }
       raise Error.new('invalid_policy') unless command_fields.keys.sort == policy.fetch('commandPackets').sort
       command_fields.each do |name, (function_code, fields)|
@@ -235,14 +234,10 @@ module Scenario
         'MM_DEBUG' => {'REQUEST_ID' => 32, 'OPERATION' => 32, 'STATUS' => 32, 'WIDTH_BYTES' => 32,
                        'MODULE_START' => 64, 'MODULE_END' => 64, 'POINTER_SLOT' => 64,
                        'ADDRESS' => 64, 'VALUE' => 64},
-        'PAYLOAD_PULSE_STATE' => {'STATE' => 8, 'BOUND' => 8, 'LAST_VALUE' => 8, 'FAULT_LATCH' => 8,
-                                  'PULSE_COUNT' => 32, 'SLOT_ADDRESS' => 32,
-                                  'FEED_TARGET_ADDRESS' => 32, 'AUTHORIZED_KICK_ADDRESS' => 32,
-                                  'BIND_COUNT' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32},
-        'PAYLOAD_CTRL_STATE' => {'MODE' => 8, 'KICK' => 8, 'FAULT' => 8, 'HALT_ACKED' => 8,
-                                 'SEEN_TRANSITIONS' => 32, 'FAULT_COUNT' => 32,
-                                 'KICK_ADDRESS' => 32, 'MODE_ADDRESS' => 32,
-                                 'LAST_FAULT_VALUE' => 32, 'LAST_CONTROL_SEQUENCE' => 32}
+        'PAYLOAD_DATA_STATE' => {'STATE' => 8, 'LAST_SAMPLE' => 8, 'RESERVED' => 16,
+                                 'SAMPLE_COUNT' => 32, 'POINTER_SLOT' => 32,
+                                 'WRITE_TARGET_ADDRESS' => 32, 'BUFFER_ADDRESS' => 32,
+                                 'GUARD_ADDRESS' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32}
       }
       raise Error.new('invalid_policy') unless telemetry_fields.keys.sort == policy.fetch('telemetryPackets').sort
       telemetry_fields.each do |name, fields|
@@ -253,20 +248,6 @@ module Scenario
                %w[RECEIVED_TIMESECONDS RECEIVED_COUNT].all? { |item| items.dig(item, 'data_type') == 'DERIVED' }
           raise Error.new('telemetry_definition_mismatch', nil, 409)
         end
-      end
-      event_packet = OpenC3::TargetModel.packet(target, policy.fetch('eventPacket'), type: :TLM, scope: scope)
-      unless event_packet['target_name'] == target && event_packet['packet_name'] == policy.fetch('eventPacket')
-        raise Error.new('telemetry_definition_mismatch', nil, 409)
-      end
-      event_items = event_packet.fetch('items', []).to_h { |item| [item['name'], item] }
-      unless event_items.dig('PACKET_ID_APP_NAME', 'data_type') == 'STRING' &&
-             event_items.dig('PACKET_ID_APP_NAME', 'bit_size') == 160 &&
-             event_items.dig('PACKET_ID_EVENT_ID', 'data_type') == 'UINT' &&
-             event_items.dig('PACKET_ID_EVENT_ID', 'bit_size') == 16 &&
-             event_items.dig('MESSAGE', 'data_type') == 'STRING' &&
-             event_items.dig('MESSAGE', 'bit_size') == 976 &&
-             %w[RECEIVED_TIMESECONDS RECEIVED_COUNT].all? { |item| event_items.dig(item, 'data_type') == 'DERIVED' }
-        raise Error.new('telemetry_definition_mismatch', nil, 409)
       end
     end
 

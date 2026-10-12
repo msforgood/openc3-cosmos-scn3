@@ -1,0 +1,7 @@
+<%= cfs_cmd_hdr(target_name, 'PAYLOAD_DATA_NOOP_CMD', 0, 'PAYLOAD_DATA_APP no-op') %>
+
+<%= cfs_cmd_hdr(target_name, 'PAYLOAD_DATA_PAUSE_CMD', 2, 'Pause periodic payload data buffer writes') %>
+
+<%= cfs_cmd_hdr(target_name, 'PAYLOAD_DATA_RESUME_CMD', 3, 'Resume periodic payload data buffer writes') %>
+
+<%= cfs_cmd_hdr(target_name, 'PAYLOAD_DATA_STATUS_CMD', 4, 'Report PAYLOAD_DATA_APP state') %>

@@ -1,0 +1,11 @@
+<%= cfs_tlm_hdr(target_name, 'TC_CAMERA_RESULT', 'Result of a simulated photo capture') %>
+   APPEND_ITEM REQUEST_ID 16 UINT "Request identifier"
+   APPEND_ITEM STATUS 16 UINT "Capture result"
+      STATE OK 0
+      STATE BAD_NAME 1
+      STATE SOURCE_ERROR 2
+      STATE DEST_ERROR 3
+      STATE WRITE_ERROR 4
+      STATE MKDIR_ERROR 5
+   APPEND_ITEM BYTES_WRITTEN 32 UINT "Image bytes written to the destination"
+   APPEND_ITEM FILENAME 256 STRING "Requested 32-byte filename"

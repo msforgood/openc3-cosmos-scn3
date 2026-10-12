@@ -1,0 +1,18 @@
+<%= cfs_cmd_hdr(target_name, 'CI_LAB_SEND_HK_CMD', 0, 'CI_LAB housekeeping request command') %>
+
+<%= cfs_cmd_hdr(target_name, 'CI_LAB_CMD_NOOP', 0, "Telecommand Message") %>
+
+<%= cfs_cmd_hdr(target_name, 'CI_LAB_CMD_RESET_COUNTERS', 1, "Telecommand Message") %>
+
+<%= cfs_cmd_hdr(target_name, 'CI_LOG_STATUS_CMD', 2, "Read current onboard TC log status") %>
+   APPEND_PARAMETER REQUEST_ID 16 UINT 0 MAX_UINT16 0 "Request identifier echoed in CI_LOG_STATUS"
+   APPEND_PARAMETER RESERVED 16 UINT 0 0 0 "Reserved; must be zero"
+
+<%= cfs_cmd_hdr(target_name, 'CI_LOG_SEAL_CMD', 3, "Seal the current onboard TC log file") %>
+   APPEND_PARAMETER REQUEST_ID 16 UINT 0 MAX_UINT16 0 "Request identifier echoed in CI_LOG_STATUS"
+   APPEND_PARAMETER RESERVED 16 UINT 0 0 0 "Reserved; must be zero"
+
+<%= cfs_cmd_hdr(target_name, 'CI_LOG_READ_CMD', 4, "Read 256 bytes of a sealed onboard TC log") %>
+   APPEND_PARAMETER REQUEST_ID 16 UINT 0 MAX_UINT16 0 "Request identifier echoed in CI_LOG_CHUNK"
+   APPEND_PARAMETER FILE_INDEX 16 UINT 1 9999 1 "tcNNNN.log file index"
+   APPEND_PARAMETER OFFSET 32 UINT 0 MAX_UINT32 0 "Byte offset into the sealed log file"

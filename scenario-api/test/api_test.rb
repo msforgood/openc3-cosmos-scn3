@@ -23,7 +23,7 @@ class ApiTest < ScenarioTest
   def test_authenticated_catalog_run_events_context_and_stop_end_to_end
     get '/scenario-api/scenarios', scope: 'DEFAULT'
     assert_equal 200, last_response.status, last_response.body
-    assert_equal 8, parsed['items'].size
+    assert_equal 3, parsed['items'].size
     json_post '/scenario-api/runs', input
     assert_equal 201, last_response.status, last_response.body
     id = parsed['id']
@@ -35,7 +35,7 @@ class ApiTest < ScenarioTest
     get "/scenario-api/runs/#{id}/events", scope: 'DEFAULT'
     assert_operator parsed['next_cursor'], :>, 0
     get "/scenario-api/runs/#{id}/context", scope: 'DEFAULT'
-    assert_equal 'qemu-es-housekeeping', parsed.dig('definition', 'id')
+    assert_equal 'cs-crc-key-oracle', parsed.dig('definition', 'id')
     json_post "/scenario-api/runs/#{id}/stop", { scope: 'DEFAULT' }
     assert_equal 200, last_response.status
     assert_equal 'stopping', parsed['state']

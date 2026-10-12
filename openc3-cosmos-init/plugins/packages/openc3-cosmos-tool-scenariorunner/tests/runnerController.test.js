@@ -42,6 +42,16 @@ describe('run locks and contract', () => {
     pending.resolve(run()); await first
     expect(controller.locked).toBe(true)
   })
+  it('starts a manual run with an explicit mode while keeping automatic requests unchanged', async () => {
+    await controller.selectTarget('A')
+    api.start.mockResolvedValue({ ...run(), execution_mode: 'manual' })
+    expect(await controller.start(scenario, 'manual')).toBe(true)
+    expect(api.start.mock.calls[0][0].execution_mode).toBe('manual')
+    controller.applyRun(run('succeeded'))
+    api.start.mockResolvedValue(run())
+    expect(await controller.start(scenario)).toBe(true)
+    expect(api.start.mock.calls[1][0]).not.toHaveProperty('execution_mode')
+  })
   it('recovers an active server run before allowing another start', async () => {
     api.runs.mockResolvedValue({ items: [run('unknown')] })
     api.run.mockResolvedValue(run('unknown'))
@@ -49,6 +59,48 @@ describe('run locks and contract', () => {
     expect(state.status).toBe('needs_attention')
     expect(controller.locked).toBe(true)
     expect(await controller.start(scenario)).toBe(false)
+  })
+  it('does not restore a terminal run saved by a previous page visit', async () => {
+    state.target = 'A'; controller.save({ runId: 'run-1', runState: 'succeeded' }); state.target = ''
+    await controller.selectTarget('A')
+    expect(api.run).not.toHaveBeenCalled()
+    expect(state.run).toBeNull()
+    expect(state.status).toBe('ready')
+    expect(controller.saved().runId).toBeUndefined()
+    expect(controller.saved().runState).toBeUndefined()
+  })
+  it('recovers a run that completed while an active page was refreshing', async () => {
+    state.target = 'A'; controller.save({ runId: 'run-1', runState: 'running' }); state.target = ''
+    api.run.mockResolvedValue(run('succeeded'))
+    await controller.selectTarget('A')
+    expect(api.run).toHaveBeenCalledWith('run-1')
+    expect(state.run?.state).toBe('succeeded')
+    expect(state.status).toBe('succeeded')
+    expect(controller.saved()).toMatchObject({ runId: 'run-1', runState: 'succeeded' })
+  })
+  it('keeps the completed result in the current page session', async () => {
+    await controller.selectTarget('A')
+    await controller.start(scenario, 'manual')
+    controller.applyEvents({ items: [{ id: 1, type: 'step', data: { step_id: 'hk', status: 'succeeded', message: 'Done' } }], next_cursor: 1 })
+    controller.applyRun(run('succeeded'))
+    api.run.mockResolvedValue(run('succeeded'))
+    await controller.discover()
+    expect(state.run?.state).toBe('succeeded')
+    expect(state.steps.hk.message).toBe('Done')
+  })
+  it('recovers only an active run from a legacy saved id without run state', async () => {
+    state.target = 'A'; controller.save({ runId: 'run-1' }); state.target = ''
+    api.run.mockResolvedValueOnce(run('succeeded'))
+    await controller.selectTarget('A')
+    expect(state.run).toBeNull()
+    expect(state.status).toBe('ready')
+    expect(controller.saved().runId).toBeUndefined()
+
+    state.target = 'A'; controller.save({ runId: 'run-1' }); state.target = ''
+    api.run.mockResolvedValueOnce(run('running'))
+    await controller.selectTarget('A')
+    expect(state.run?.state).toBe('running')
+    expect(controller.locked).toBe(true)
   })
   it('keeps a definite admission rejection visible through discovery until retry or scenario change', async () => {
     await controller.selectTarget('A')
@@ -114,6 +166,15 @@ describe('run locks and contract', () => {
     controller.applyEvents({ items: [{ id: 1201, type: 'step', data: { step_id: 'hk', status: 'succeeded', telemetryConfirmed: true } }], next_cursor: 1201 })
     expect(state.steps.hk.telemetryConfirmed).toBe(true)
   })
+  it('preserves accepted TC events with raw parameter JSON in the Run log', () => {
+    const parameters = '{"ADDRESS":9223372036854775807,"SIZE":1}'
+    const command = { id: 1, type: 'command', data: { step_id: 'recover-byte-00', packet: 'CS_CMD_ONE_SHOT', parameters_json: parameters } }
+    controller.applyEvents({ items: [command], next_cursor: 1 })
+    controller.applyEvents({ items: [command, { ...command, id: 2 }], next_cursor: 2 })
+    expect(state.logs).toEqual([command, { ...command, id: 2 }])
+    controller.applyRun(run())
+    expect(state.logs).toEqual([])
+  })
   it('sends managed prompt choice without arbitrary input or duplicate submission', async () => {
     await controller.selectTarget('A')
     const waiting = { ...run('waiting'), prompt: { prompt_id: 'p1', status: 'pending' } }
@@ -125,6 +186,14 @@ describe('run locks and contract', () => {
     expect(api.answer).toHaveBeenCalledWith('run-1', 'p1', 'continue')
     pending.resolve(run()); await answer
     expect(state.prompt).toBeNull()
+  })
+  it('rejects a stale step button when its prompt id no longer matches', async () => {
+    await controller.selectTarget('A')
+    controller.applyRun({ ...run('waiting'), execution_mode: 'manual', prompt: { prompt_id: 'step-2', status: 'pending' } })
+    await controller.action('answer', 'continue', 'step-1')
+    expect(api.answer).not.toHaveBeenCalled()
+    await controller.action('answer', 'continue', 'step-2')
+    expect(api.answer).toHaveBeenCalledWith('run-1', 'step-2', 'continue')
   })
   it('drains terminal event pages at the API page size before ending polling', async () => {
     await controller.selectTarget('A')

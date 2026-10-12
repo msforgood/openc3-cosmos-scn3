@@ -1,6 +1,7 @@
-"""Scenario 3 must prove a denied direct write before an indirect pointer edit."""
+"""Scenario 3 edits one permitted pointer and proves the original cFS process SIGSEGV."""
 
 import copy
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 import sys
@@ -22,13 +23,14 @@ class Management:
     run_id = "psp_indirect_write"
     scope = "DEFAULT"
 
-    def __init__(self, definition, clock):
+    def __init__(self, definition, clock, target="CFS-1_QEMU"):
         self.events = []
         self.data = {
             "run_id": self.run_id, "scope": self.scope,
-            "target": definition["supportedTargets"][0], "definition": copy.deepcopy(definition),
+            "target": target, "definition": copy.deepcopy(definition),
             "definition_hash": runner.canonical_hash(definition), "stop_requested": False,
-            "prompt": None, "deadline": datetime.fromtimestamp(clock.now + 120, timezone.utc).isoformat(),
+            "execution_mode": "automatic", "prompt": None,
+            "deadline": datetime.fromtimestamp(clock.now + 120, timezone.utc).isoformat(),
         }
 
     def context(self):
@@ -39,29 +41,56 @@ class Management:
         return self.context()
 
 
+class Observer:
+    INSTANCE = "boot-a:123:456"
+
+    def __init__(self, target, clock, *, signal=11, exit_after_resume=True, exit_instance=None,
+                 initially_running=True, failure=False):
+        self.target, self.clock = target, clock
+        self.signal = signal
+        self.exit_after_resume = exit_after_resume
+        self.exit_instance = exit_instance or self.INSTANCE
+        self.running = initially_running
+        self.last_exit = None
+        self.failure = failure
+        self.reads = 0
+
+    def crash(self):
+        if self.exit_after_resume:
+            self.running = False
+            self.last_exit = {
+                "instance_id": self.exit_instance,
+                "signal": self.signal,
+                "signal_name": "SIGSEGV" if self.signal == 11 else "SIGABRT",
+                "observed_at": datetime.fromtimestamp(self.clock.now, timezone.utc).isoformat(),
+            }
+
+    def status(self, target):
+        self.reads += 1
+        if self.failure:
+            raise RuntimeError("observer down")
+        return {"target": self.target, "running": self.running,
+                "instance_id": self.INSTANCE if self.running else None,
+                "pid": 123 if self.running else None,
+                "last_exit": copy.deepcopy(self.last_exit)}
+
+
 class Adapter:
-    KICK = 0x120040
-    MODE = 0x1200FF
+    BUFFER = 0x120000
+    GUARD = 0x121000
     SLOT = 0x300080
 
-    def __init__(self, clock, *, direct_denied=True, bury_es_exit=False, publish_es_exit=True,
-                 event_burst_before_exit=0):
+    def __init__(self, clock, observer, *, direct_denied=True):
         self.clock = clock
+        self.observer = observer
         self.direct_denied = direct_denied
-        self.bury_es_exit = bury_es_exit
-        self.publish_es_exit = publish_es_exit
-        self.event_burst_before_exit = event_burst_before_exit
         self.sent = []
         self.samples = {}
-        self.event_stream = []
-        self.subscribed_before_resume = False
-        self.pointer = self.KICK
-        self.pulse_count = 10
-        self.pulse_state = 1
-        self.pulse_action = 2
-        self.fault = 0
-        self.acked = 0
-        self.mode = 1
+        self.pointer = self.BUFFER
+        self.sample_count = 10
+        self.state = 1
+        self.action = 1
+        self.resumed_without_tm = False
 
     def targets(self):
         return ["CFS-1_QEMU", "CFS-1_BBB"]
@@ -72,10 +101,9 @@ class Adapter:
             "MM_CMD_DEBUG_READ": (14, {"REQUEST_ID": 32, "WIDTH_BYTES": 32, "ADDRESS": 64}),
             "MM_CMD_DEBUG_WRITE": (15, {"REQUEST_ID": 32, "WIDTH_BYTES": 32, "ADDRESS": 64,
                                          "VALUE": 32, "RESERVED": 32}),
-            "PAYLOAD_PULSE_PAUSE_CMD": (2, {}),
-            "PAYLOAD_PULSE_RESUME_CMD": (3, {}),
-            "PAYLOAD_PULSE_STATUS_CMD": (4, {}),
-            "PAYLOAD_CTRL_STATUS_CMD": (2, {}),
+            "PAYLOAD_DATA_PAUSE_CMD": (2, {}),
+            "PAYLOAD_DATA_RESUME_CMD": (3, {}),
+            "PAYLOAD_DATA_STATUS_CMD": (4, {}),
         }
         fc, payload = fields[packet]
         header = dict(runner.HEADER_DEFAULTS, CCSDS_STREAMID=runner.COMMANDS[packet][1], CCSDS_FC=fc)
@@ -87,20 +115,15 @@ class Adapter:
     def telemetry_definition(self, target, packet):
         fields = {
             "MM_DEBUG": {"REQUEST_ID": 32, "OPERATION": 32, "STATUS": 32, "WIDTH_BYTES": 32,
-                         "MODULE_START": 64, "MODULE_END": 64, "POINTER_SLOT": 64, "ADDRESS": 64, "VALUE": 64},
-            "PAYLOAD_PULSE_STATE": {"STATE": 8, "BOUND": 8, "LAST_VALUE": 8, "FAULT_LATCH": 8,
-                                    "PULSE_COUNT": 32, "SLOT_ADDRESS": 32, "FEED_TARGET_ADDRESS": 32,
-                                    "AUTHORIZED_KICK_ADDRESS": 32, "BIND_COUNT": 32, "LAST_ACTION": 32,
-                                    "LAST_ERROR": 32},
-            "PAYLOAD_CTRL_STATE": {"MODE": 8, "KICK": 8, "FAULT": 8, "HALT_ACKED": 8,
-                                   "SEEN_TRANSITIONS": 32, "FAULT_COUNT": 32, "KICK_ADDRESS": 32,
-                                   "MODE_ADDRESS": 32, "LAST_FAULT_VALUE": 32,
-                                   "LAST_CONTROL_SEQUENCE": 32},
-            "CFE_EVS_LONG_EVENT_MSG": {"PACKET_ID_APP_NAME": 160, "PACKET_ID_EVENT_ID": 16,
-                                       "MESSAGE": 976},
+                         "MODULE_START": 64, "MODULE_END": 64, "POINTER_SLOT": 64,
+                         "ADDRESS": 64, "VALUE": 64},
+            "PAYLOAD_DATA_STATE": {"STATE": 8, "LAST_SAMPLE": 8, "RESERVED": 16,
+                                   "SAMPLE_COUNT": 32, "POINTER_SLOT": 32,
+                                   "WRITE_TARGET_ADDRESS": 32, "BUFFER_ADDRESS": 32,
+                                   "GUARD_ADDRESS": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
         }[packet]
-        items = [{"name": name, "data_type": "STRING" if name in ("PACKET_ID_APP_NAME", "MESSAGE")
-                  else "UINT", "bit_size": size} for name, size in fields.items()]
+        items = [{"name": name, "data_type": "UINT", "bit_size": size}
+                 for name, size in fields.items()]
         items += [{"name": name, "data_type": "DERIVED"} for name in runner.RECEIPT_ITEMS]
         return {"target_name": target, "packet_name": packet, "items": items}
 
@@ -111,57 +134,32 @@ class Adapter:
         return runner.PacketSample({name: sample.values.get(name) for name in fields},
                                    sample.count, sample.received, sample.stale)
 
-    def subscribe_packets(self, target, packet):
-        self.event_target = target
-        self.subscribed_before_resume = not any(name == "PAYLOAD_PULSE_RESUME_CMD" for name, _ in self.sent)
-        return str(len(self.event_stream))
-
-    def get_packets(self, cursor):
-        start = int(cursor)
-        packets = self.event_stream[start:start + 256]
-        return str(start + len(packets)), packets
-
     def _publish(self, packet, values):
         previous = self.samples.get(packet)
-        self.samples[packet] = runner.PacketSample(values, (previous.count if previous else 0) + 1, self.clock.now)
-        if packet == "CFE_EVS_LONG_EVENT_MSG":
-            self.event_stream.append({"target_name": self.event_target, "packet_name": packet, **values})
+        self.samples[packet] = runner.PacketSample(
+            values, (previous.count if previous else 0) + 1, self.clock.now)
 
     def command(self, target, packet, parameters, timeout):
         self.sent.append((packet, parameters))
         self.clock.now += 0.1
-        if packet == "PAYLOAD_PULSE_PAUSE_CMD":
-            self.pulse_state, self.pulse_action = 2, 3
-        if packet == "PAYLOAD_PULSE_RESUME_CMD":
-            self.pulse_state, self.pulse_action = 3, 5
-            self.pulse_count += 1
-            self.mode, self.fault, self.acked = 0xA5, 1, 1
-            self._publish("PAYLOAD_CTRL_STATE", self._ctrl_values())
-            for _ in range(self.event_burst_before_exit):
-                self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "PAYLOAD_PULSE_APP",
-                                                          "PACKET_ID_EVENT_ID": 3,
-                                                          "MESSAGE": "Pulse event before controller exit"})
-            if self.publish_es_exit:
-                self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "CFE_ES",
-                                                          "PACKET_ID_EVENT_ID": 14,
-                                                          "MESSAGE": "Exit Application PAYLOAD_CTRL_APP Completed."})
-            if self.bury_es_exit:
-                self._publish("CFE_EVS_LONG_EVENT_MSG", {"PACKET_ID_APP_NAME": "PAYLOAD_PULSE_APP",
-                                                          "PACKET_ID_EVENT_ID": 3,
-                                                          "MESSAGE": "Pulse halted after controller fault"})
-        if packet.startswith("PAYLOAD_PULSE_"):
-            self._publish("PAYLOAD_PULSE_STATE", self._pulse_values())
-        elif packet == "PAYLOAD_CTRL_STATUS_CMD":
-            self._publish("PAYLOAD_CTRL_STATE", self._ctrl_values())
+        if packet == "PAYLOAD_DATA_PAUSE_CMD":
+            self.state, self.action = 2, 2
+        elif packet == "PAYLOAD_DATA_RESUME_CMD":
+            self.resumed_without_tm = True
+            self.observer.crash()
+            return {"target_name": target, "cmd_name": packet}
+        if packet.startswith("PAYLOAD_DATA_"):
+            self._publish("PAYLOAD_DATA_STATE", self._data_values())
         elif packet.startswith("MM_CMD_DEBUG_"):
             status, value = 0, 0
             if packet == "MM_CMD_DEBUG_READ":
                 value = self.pointer
-            if packet == "MM_CMD_DEBUG_WRITE":
-                if parameters["ADDRESS"] == self.MODE:
+            elif packet == "MM_CMD_DEBUG_WRITE":
+                if parameters["ADDRESS"] == self.BUFFER:
                     status = 3 if self.direct_denied else 0
                 elif parameters["ADDRESS"] == self.SLOT:
-                    self.pointer = (self.pointer & ~0xff) | parameters["VALUE"]
+                    self.pointer = parameters["VALUE"]
+                value = parameters["VALUE"]
             operation = {"MM_CMD_DEBUG_MAP": 13, "MM_CMD_DEBUG_READ": 14,
                          "MM_CMD_DEBUG_WRITE": 15}[packet]
             self._publish("MM_DEBUG", {"REQUEST_ID": parameters["REQUEST_ID"],
@@ -172,78 +170,114 @@ class Adapter:
                                        "VALUE": value})
         return {"target_name": target, "cmd_name": packet}
 
-    def _pulse_values(self):
-        return {"STATE": self.pulse_state, "BOUND": 1, "LAST_VALUE": 0x5A,
-                "FAULT_LATCH": int(self.fault > 0), "PULSE_COUNT": self.pulse_count,
-                "SLOT_ADDRESS": self.SLOT, "FEED_TARGET_ADDRESS": self.pointer,
-                "AUTHORIZED_KICK_ADDRESS": self.KICK, "BIND_COUNT": 1,
-                "LAST_ACTION": self.pulse_action, "LAST_ERROR": 0}
-
-    def _ctrl_values(self):
-        return {"MODE": self.mode, "KICK": 0x5A, "FAULT": self.fault,
-                "HALT_ACKED": self.acked, "SEEN_TRANSITIONS": 10,
-                "FAULT_COUNT": self.fault, "KICK_ADDRESS": self.KICK,
-                "MODE_ADDRESS": self.MODE, "LAST_FAULT_VALUE": self.mode if self.fault else 0,
-                "LAST_CONTROL_SEQUENCE": self.fault}
+    def _data_values(self):
+        return {"STATE": self.state, "LAST_SAMPLE": 0x5a, "RESERVED": 0,
+                "SAMPLE_COUNT": self.sample_count, "POINTER_SLOT": self.SLOT,
+                "WRITE_TARGET_ADDRESS": self.pointer, "BUFFER_ADDRESS": self.BUFFER,
+                "GUARD_ADDRESS": self.GUARD, "LAST_ACTION": self.action,
+                "LAST_ERROR": 0}
 
 
 class PspIndirectWriteTests(unittest.TestCase):
     def build(self, target="CFS-1_QEMU", **options):
         catalog = runner.load_catalog()
-        definition = catalog[runner.PSP["scenarioIds"][target]]
+        definition = catalog[runner.PSP["scenarioId"]]
         clock = Clock()
-        adapter = Adapter(clock, **options)
-        management = Management(definition, clock)
+        observer_options = {key: options.pop(key) for key in list(options)
+                            if key in ("signal", "exit_after_resume", "exit_instance",
+                                       "initially_running", "failure")}
+        observer = Observer(target, clock, **observer_options)
+        adapter = Adapter(clock, observer, **options)
+        management = Management(definition, clock, target=target)
         engine = runner.ScenarioRunner(adapter, management, catalog, runner.canonical_hash(definition),
-                                       monotonic=lambda: clock.now, wall_time=lambda: clock.now,
-                                       sleep=clock.sleep, call=lambda fn, _seconds, _label: fn())
-        return engine, adapter, management
+                                       observer=observer, monotonic=lambda: clock.now,
+                                       wall_time=lambda: clock.now, sleep=clock.sleep,
+                                       call=lambda fn, _seconds, _label: fn())
+        return engine, adapter, observer, management
 
-    def test_both_targets_deny_direct_write_then_redirect_one_byte(self):
+    def test_both_targets_deny_direct_write_then_write_full_pointer_and_confirm_signal(self):
         for target in ("CFS-1_QEMU", "CFS-1_BBB"):
             with self.subTest(target=target):
-                engine, adapter, management = self.build(target)
+                engine, adapter, observer, management = self.build(target)
                 self.assertEqual(engine.run(), {"status": "succeeded"})
                 commands = [name for name, _args in adapter.sent]
-                self.assertLess(commands.index("MM_CMD_DEBUG_MAP"), commands.index("PAYLOAD_PULSE_PAUSE_CMD"))
-                self.assertEqual(adapter.sent[3][1]["ADDRESS"], Adapter.MODE)  # denied control
-                self.assertEqual(adapter.pointer, Adapter.MODE)
-                self.assertEqual([args["VALUE"] for name, args in adapter.sent
-                                  if name == "MM_CMD_DEBUG_WRITE"], [1, 0xFF])
+                self.assertLess(commands.index("MM_CMD_DEBUG_MAP"),
+                                commands.index("PAYLOAD_DATA_PAUSE_CMD"))
+                writes = [args for name, args in adapter.sent if name == "MM_CMD_DEBUG_WRITE"]
+                self.assertEqual([(x["WIDTH_BYTES"], x["ADDRESS"], x["VALUE"])
+                                  for x in writes], [(1, Adapter.BUFFER, 0),
+                                                     (4, Adapter.SLOT, Adapter.GUARD)])
+                self.assertEqual(adapter.pointer, Adapter.GUARD)
+                self.assertTrue(adapter.resumed_without_tm)
+                self.assertGreater(observer.reads, 2)
+                accepted = [data for kind, data in management.events if kind == "command" and
+                            data["step_id"] == "write-pointer"]
+                self.assertEqual(len(accepted), 1)
+                self.assertEqual(accepted[0]["packet"], "MM_CMD_DEBUG_WRITE")
+                self.assertEqual(json.loads(accepted[0]["parameters_json"])["VALUE"], Adapter.GUARD)
                 steps = {data["step_id"]: data for kind, data in management.events
                          if kind == "step" and data["status"] == "succeeded"}
-                self.assertEqual(steps["observe-fault"]["halt_acked"], 1)
-                self.assertEqual(steps["confirm-es-exit"]["es_event_id"], 14)
-                self.assertEqual(steps["confirm-pulse"]["pulse_target"], Adapter.MODE)
-
-    def test_es_exit_survives_newer_evs_packet_replacing_latest_value(self):
-        engine, adapter, management = self.build(bury_es_exit=True)
-        self.assertEqual(engine.run(), {"status": "succeeded"})
-        self.assertTrue(adapter.subscribed_before_resume)
-        self.assertEqual(adapter.samples["CFE_EVS_LONG_EVENT_MSG"].values["PACKET_ID_EVENT_ID"], 3)
-        steps = {data["step_id"]: data for kind, data in management.events
-                 if kind == "step" and data["status"] == "succeeded"}
-        self.assertEqual(steps["confirm-es-exit"]["es_event_id"], 14)
-
-    def test_missing_es_exit_fails_closed(self):
-        engine, _adapter, _management = self.build(publish_es_exit=False, bury_es_exit=True)
-        with self.assertRaisesRegex(runner.ScenarioError, "es_app_error_unconfirmed"):
-            engine.run()
-
-    def test_es_exit_after_first_stream_batch(self):
-        engine, adapter, management = self.build(event_burst_before_exit=300)
-        self.assertEqual(engine.run(), {"status": "succeeded"})
-        self.assertEqual(len(adapter.event_stream), 301)
-        steps = {data["step_id"]: data for kind, data in management.events
-                 if kind == "step" and data["status"] == "succeeded"}
-        self.assertEqual(steps["confirm-es-exit"]["es_event_id"], 14)
+                self.assertFalse(steps["resume"]["telemetryConfirmed"])
+                self.assertEqual(steps["confirm-sigsegv"]["exit_signal"], 11)
+                self.assertEqual(steps["confirm-sigsegv"]["process_instance"], Observer.INSTANCE)
 
     def test_direct_write_not_denied_stops_before_pointer_edit(self):
-        engine, adapter, _management = self.build(direct_denied=False)
+        engine, adapter, _observer, _management = self.build(direct_denied=False)
         with self.assertRaisesRegex(runner.ScenarioError, "debug_status_0"):
             engine.run()
-        self.assertFalse(any(name == "PAYLOAD_PULSE_PAUSE_CMD" for name, _args in adapter.sent))
-        self.assertEqual(adapter.pointer, Adapter.KICK)
+        self.assertFalse(any(name == "PAYLOAD_DATA_PAUSE_CMD" for name, _args in adapter.sent))
+        self.assertEqual(adapter.pointer, Adapter.BUFFER)
+
+    def test_wrong_signal_fails_closed(self):
+        engine, _adapter, _observer, _management = self.build(signal=6)
+        with self.assertRaisesRegex(runner.ScenarioError, "wrong_exit_signal"):
+            engine.run()
+
+    def test_unmatched_process_exit_fails_closed(self):
+        engine, _adapter, _observer, _management = self.build(exit_instance="other-boot:123:456")
+        with self.assertRaisesRegex(runner.ScenarioError, "sigsegv_unconfirmed"):
+            engine.run()
+
+    def test_no_process_exit_fails_closed(self):
+        engine, _adapter, _observer, _management = self.build(exit_after_resume=False)
+        with self.assertRaisesRegex(runner.ScenarioError, "sigsegv_unconfirmed"):
+            engine.run()
+
+    def test_observer_unavailable_blocks_before_any_tc(self):
+        engine, adapter, observer, _management = self.build(failure=True)
+        with self.assertRaisesRegex(runner.ScenarioError, "runtime_error"):
+            engine.run()
+        self.assertEqual(adapter.sent, [])
+        self.assertEqual(observer.reads, 1)
+
+    def test_observer_client_uses_only_fixed_private_status_route(self):
+        class Response:
+            status_code = 200
+
+            def iter_content(self, _size):
+                yield b'{"target":"CFS-1_QEMU","running":true,"instance_id":"a","pid":2,"last_exit":null}'
+
+            def close(self):
+                pass
+
+        class Session:
+            def __init__(self):
+                self.calls = []
+
+            def request(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return Response()
+
+        with self.assertRaisesRegex(runner.ScenarioError, "invalid_observer_url"):
+            runner.ObserverClient("http://public.example:2911")
+        session = Session()
+        client = runner.ObserverClient("http://scenario-observer:2911", "local-test-token", session)
+        self.assertTrue(client.status("CFS-1_QEMU")["running"])
+        self.assertEqual(session.calls[0][0],
+                         ("GET", "http://scenario-observer:2911/v1/targets/CFS-1_QEMU/status"))
+        self.assertEqual(session.calls[0][1]["headers"]["Authorization"], "Bearer local-test-token")
+        with self.assertRaisesRegex(runner.ScenarioError, "unsupported_target"):
+            client.status("other-host")
 
 
 if __name__ == "__main__":

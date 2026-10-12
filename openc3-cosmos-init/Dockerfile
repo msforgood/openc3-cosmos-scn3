@@ -133,7 +133,7 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-docs", "/ope
 
 # Scenario keeps its independent release version and procedure-only Ruby package.
 FROM openc3-frontend-tmp AS openc3-scenario
-ARG SCENARIO_VERSION=1.0.14
+ARG SCENARIO_VERSION=1.0.22
 COPY ./plugins/packages/openc3-cosmos-tool-scenariorunner/ packages/openc3-cosmos-tool-scenariorunner/
 RUN /openc3/plugins/docker-package-build.sh openc3-cosmos-tool-scenariorunner "" "${SCENARIO_VERSION}"
 COPY ./plugins/packages/openc3-cosmos-cfs-scenario-runner/ packages/openc3-cosmos-cfs-scenario-runner/
@@ -143,7 +143,7 @@ RUN cd packages/openc3-cosmos-cfs-scenario-runner \
   && ruby build_manifest.rb "${SCENARIO_VERSION}" /openc3/plugins/gems targets/SCENARIO_RUNNER/lib
 
 FROM ${OPENC3_REGISTRY}/${OPENC3_NAMESPACE}/${OPENC3_BASE_IMAGE}:${OPENC3_TAG}
-ARG SCENARIO_VERSION=1.0.14
+ARG SCENARIO_VERSION=1.0.22
 ENV SCENARIO_VERSION=${SCENARIO_VERSION}
 
 # System gems remain visible when the deployment mounts /gems and sets GEM_HOME.
@@ -169,6 +169,7 @@ COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plu
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/pnpm-lock.yaml /openc3/plugins/pnpm-lock.yaml
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/pnpm-workspace.yaml /openc3/plugins/pnpm-workspace.yaml
 COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/gems/ /openc3/plugins/gems/
+COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./cfs-artifacts/openc3-cosmos-cfs-7.0.5.pre.all.2.gem /openc3/plugins/gems/
 # Installer support and catalog come from the same canonical procedure source.
 COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./scenario/ /openc3/scenario/
 COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/packages/openc3-cosmos-cfs-scenario-runner/targets/SCENARIO_RUNNER/lib/scenarios.json /openc3/scenario/catalog/scenarios.json

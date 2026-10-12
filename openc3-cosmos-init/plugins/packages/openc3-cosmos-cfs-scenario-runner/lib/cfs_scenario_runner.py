@@ -34,8 +34,11 @@ RECEIPT_ITEMS = ("RECEIVED_COUNT", "RECEIVED_TIMESECONDS")
 RESERVED_ITEMS = frozenset({"PACKET_TIMESECONDS", "PACKET_TIMEFORMATTED", "RECEIVED_TIMESECONDS", "RECEIVED_TIMEFORMATTED", "RECEIVED_COUNT"})
 HEADER_DEFAULTS = POLICY["headerDefaults"]
 IDENTIFIER = re.compile(r"[a-z][a-z0-9-]{0,63}\Z")
-MAX_EVENTS = 64
+MAX_EVENTS = 128
 MAX_CALLS = 1024
+MANUAL_MAX_CALLS = 4096
+MANUAL_TIMEOUT_SEC = 1800
+MANUAL_POLL_SEC = 2
 MAX_CATALOG_BYTES = 65536
 
 
@@ -107,13 +110,18 @@ def validate_definition(definition):
     require(type(definition["version"]) is str and len(definition["version"]) <= 32 and re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", definition["version"]))
     for field, maximum in (("name", 120), ("description", 1000)):
         require(type(definition[field]) is str and 1 <= len(definition[field]) <= maximum)
-    require(type(definition["supportedTargets"]) is list and len(definition["supportedTargets"]) == 1 and definition["supportedTargets"][0] in ALLOWED_TARGETS)
-    if definition["supportedTargets"][0] == "CFS-1_BBB":
-        require(definition["id"] in (TCLOG["scenarioIds"]["CFS-1_BBB"], PSP["scenarioIds"]["CFS-1_BBB"],
-                                     "bbb-cs-crc-key-oracle"))
+    targets = definition["supportedTargets"]
+    require(type(targets) is list and 1 <= len(targets) <= len(ALLOWED_TARGETS) and
+            all(type(target) is str for target in targets) and
+            len(set(targets)) == len(targets) and set(targets) <= ALLOWED_TARGETS)
+    if "CFS-1_BBB" in targets:
+        require(definition["id"] in (TCLOG["scenarioId"], PSP["scenarioId"], ORACLE["scenarioId"]))
     _number(definition["timeoutSec"], 1, 120)
     _keys(definition["successCriteria"], "type requireFreshTelemetry")
-    require(definition["successCriteria"]["type"] == "allStepsSucceeded" and definition["successCriteria"]["requireFreshTelemetry"] is True)
+    psp_definition = type(definition["steps"]) is list and any(
+        type(step) is dict and step.get("type") == "pspPhase" for step in definition["steps"])
+    require(definition["successCriteria"]["type"] == "allStepsSucceeded" and
+            definition["successCriteria"]["requireFreshTelemetry"] is (not psp_definition))
     refs = definition["telemetryItems"]
     require(type(refs) is list and 1 <= len(refs) <= 20)
     refs = [_reference(value) for value in refs]
@@ -121,8 +129,8 @@ def validate_definition(definition):
     steps = definition["steps"]
     require(type(steps) is list and 2 <= len(steps) <= 18)
     if any(type(step) is dict and step.get("type") in ("resolveAddress", "crcByte", "verifyXbandFrame") for step in steps):
-        target = ORACLE["scenarioTargets"].get(definition["id"])
-        require(target is not None and definition["supportedTargets"] == [target] and definition["timeoutSec"] == 120)
+        require(definition["id"] == ORACLE["scenarioId"] and
+                definition["supportedTargets"] == POLICY["allowedTargets"] and definition["timeoutSec"] == 120)
         require(len(steps) == ORACLE["keyBytes"] + 2)
         expected_refs = {
             (ORACLE["keyPacket"], ORACLE[name]) for name in ("keyAddressItem", "keyLengthItem", "channelReadyItem")
@@ -140,8 +148,8 @@ def validate_definition(definition):
         canonical_hash(definition)
         return definition
     if any(type(step) is dict and step.get("type") == "tcLogPhase" for step in steps):
-        target = definition["supportedTargets"][0]
-        require(definition["id"] == TCLOG["scenarioIds"].get(target) and definition["timeoutSec"] == 120)
+        require(definition["id"] == TCLOG["scenarioId"] and
+                definition["supportedTargets"] == POLICY["allowedTargets"] and definition["timeoutSec"] == 120)
         require(set(refs) == {("CI_LOG_STATUS", "RESULT"), ("CI_LOG_CHUNK", "RESULT"),
                               ("TC_CAMERA_RESULT", "STATUS")})
         require(len(steps) == len(TCLOG["phases"]))
@@ -150,11 +158,13 @@ def validate_definition(definition):
         canonical_hash(definition)
         return definition
     if any(type(step) is dict and step.get("type") == "pspPhase" for step in steps):
-        target = definition["supportedTargets"][0]
-        require(definition["id"] == PSP["scenarioIds"].get(target) and definition["timeoutSec"] == 120)
+        require(definition["id"] == PSP["scenarioId"] and
+                definition["supportedTargets"] == POLICY["allowedTargets"] and definition["timeoutSec"] == 120)
         require(set(refs) == {("MM_DEBUG", "STATUS"), ("MM_DEBUG", "POINTER_SLOT"),
-                              ("PAYLOAD_PULSE_STATE", "STATE"), ("PAYLOAD_PULSE_STATE", "FEED_TARGET_ADDRESS"),
-                              ("PAYLOAD_CTRL_STATE", "FAULT"), ("PAYLOAD_CTRL_STATE", "HALT_ACKED")})
+                              ("PAYLOAD_DATA_STATE", "STATE"),
+                              ("PAYLOAD_DATA_STATE", "WRITE_TARGET_ADDRESS"),
+                              ("PAYLOAD_DATA_STATE", "GUARD_ADDRESS"),
+                              ("PAYLOAD_DATA_STATE", "SAMPLE_COUNT")})
         require(len(steps) == len(PSP["phases"]))
         for step, phase in zip(steps, PSP["phases"]):
             require(step == {"id": phase, "type": "pspPhase", "phase": phase})
@@ -398,13 +408,59 @@ class ManagementClient:
         })
 
 
+class ObserverClient:
+    """Read-only, private host evidence for the intentionally crashing PSP demo."""
+
+    def __init__(self, base_url, token="", session=None):
+        parsed = urlsplit(base_url)
+        require(parsed.scheme == "http" and parsed.hostname == "scenario-observer" and
+                parsed.port == 2911 and parsed.path in ("", "/") and not parsed.username and
+                not parsed.password and not parsed.query and not parsed.fragment,
+                "invalid_observer_url")
+        require(type(token) is str and len(token) <= 16384, "invalid_observer_token")
+        if session is None:
+            import requests
+            session = requests.Session()
+            session.trust_env = False
+        self.url = "http://scenario-observer:2911"
+        self.token = token
+        self.session = session
+
+    def status(self, target):
+        require(target in ALLOWED_TARGETS, "unsupported_target")
+        headers = {"Accept": "application/json"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
+        response = self.session.request(
+            "GET", self.url + "/v1/targets/" + target + "/status", headers=headers,
+            timeout=(2, 22), allow_redirects=False, stream=True,
+        )
+        try:
+            require(response.status_code == 200, "observer_rejected")
+            data = bytearray()
+            for chunk in response.iter_content(4096):
+                data.extend(chunk)
+                require(len(data) <= 4096, "observer_response_too_large")
+            value = json.loads(data)
+            require(type(value) is dict, "invalid_observer_response")
+            return value
+        finally:
+            response.close()
+
+
 class ScenarioRunner:
-    def __init__(self, adapter, management, catalog, expected_hash, *, monotonic=time.monotonic, wall_time=time.time, sleep=time.sleep, call=bounded_call):
+    def __init__(self, adapter, management, catalog, expected_hash, *, observer=None,
+                 monotonic=time.monotonic, wall_time=time.time, sleep=time.sleep,
+                 call=bounded_call):
         self.adapter, self.management = adapter, management
+        self.observer = observer
         self.catalog, self.expected_hash = catalog, expected_hash
         self.monotonic, self.wall_time, self.sleep, self.call = monotonic, wall_time, sleep, call
         self.deadline = monotonic() + 5  # Bootstrap also has an absolute deadline.
         self.calls, self.events = 0, 0
+        self.max_calls = MAX_CALLS
+        self.execution_mode = None
+        self.pending_prompt_id = None
         self.last_send = None
         self.baselines = {}
         self.step_id = None
@@ -416,7 +472,7 @@ class ScenarioRunner:
 
     def _call(self, function, label, limit=2):
         self.calls += 1
-        require(self.calls <= MAX_CALLS, "call_limit")
+        require(self.calls <= self.max_calls, "call_limit")
         value = self.call(function, self._remaining(limit), label)
         self._remaining()
         return value
@@ -425,8 +481,20 @@ class ScenarioRunner:
         require(type(value) is dict, "invalid_context")
         require(value.get("run_id") == self.management.run_id and value.get("scope") == self.management.scope, "context_mismatch")
         require(value.get("target") == self.target and value.get("definition_hash") == self.expected_hash, "definition_mismatch")
+        mode = value.get("execution_mode")
+        require(mode in ("automatic", "manual"), "invalid_context")
+        require(self.execution_mode is None or mode == self.execution_mode, "execution_mode_changed")
         require(value.get("stop_requested") is False, "stop_requested")
-        require(value.get("prompt") is None, "unsupported_prompt")
+        prompt = value.get("prompt")
+        if mode == "automatic":
+            require(prompt is None, "unsupported_prompt")
+        elif prompt is not None:
+            require(type(prompt) is dict and self.pending_prompt_id is not None and
+                    prompt.get("prompt_id") == self.pending_prompt_id and
+                    prompt.get("status") in ("pending", "answered") and
+                    prompt.get("choices") == ["continue"] and
+                    (prompt.get("answer") is None if prompt["status"] == "pending" else
+                     prompt.get("answer") == "continue"), "invalid_prompt")
         return value
 
     def _emit(self, kind, data):
@@ -436,6 +504,35 @@ class ScenarioRunner:
 
     def _check_stop(self):
         return self._context(self._call(self.management.context, "context"))
+
+    def _await_manual_step(self, step):
+        self.pending_prompt_id = step["id"]
+        prompt_deadline = datetime.fromtimestamp(self.manual_prompt_deadline, timezone.utc).isoformat()
+        context = self._emit("prompt", {
+            "prompt_id": step["id"], "message": f"Execute step {step['id']}",
+            "choices": ["continue"], "deadline": prompt_deadline,
+        })
+        while True:
+            prompt = context.get("prompt")
+            require(type(prompt) is dict and prompt.get("prompt_id") == step["id"],
+                    "invalid_prompt")
+            if prompt["status"] == "answered":
+                return
+            self.sleep(min(MANUAL_POLL_SEC, self._remaining()))
+            context = self._check_stop()
+
+    def _send_command(self, packet, parameters, timeout):
+        arguments = dict(parameters)
+        parameters_json = json.dumps(arguments, sort_keys=True, separators=(",", ":"))
+        accepted = self._call(lambda: self.adapter.command(self.target, packet, arguments, timeout),
+                              "command", timeout)
+        require(type(accepted) is dict and accepted.get("target_name") == self.target and
+                accepted.get("cmd_name") == packet, "command_not_accepted")
+        self._emit("command", {
+            "step_id": self.step_id, "packet": packet,
+            "parameters_json": parameters_json,
+        })
+        return accepted
 
     def _preflight(self, definition):
         names = self._call(self.adapter.targets, "targets")
@@ -515,15 +612,15 @@ class ScenarioRunner:
                     "telemetry_definition_mismatch")
 
     def _preflight_psp(self):
+        require(self.observer is not None, "observer_unavailable")
         commands = {
             "MM_CMD_DEBUG_MAP": (13, {"REQUEST_ID": 32}),
             "MM_CMD_DEBUG_READ": (14, {"REQUEST_ID": 32, "WIDTH_BYTES": 32, "ADDRESS": 64}),
             "MM_CMD_DEBUG_WRITE": (15, {"REQUEST_ID": 32, "WIDTH_BYTES": 32, "ADDRESS": 64,
                                          "VALUE": 32, "RESERVED": 32}),
-            "PAYLOAD_PULSE_PAUSE_CMD": (2, {}),
-            "PAYLOAD_PULSE_RESUME_CMD": (3, {}),
-            "PAYLOAD_PULSE_STATUS_CMD": (4, {}),
-            "PAYLOAD_CTRL_STATUS_CMD": (2, {}),
+            "PAYLOAD_DATA_PAUSE_CMD": (2, {}),
+            "PAYLOAD_DATA_RESUME_CMD": (3, {}),
+            "PAYLOAD_DATA_STATUS_CMD": (4, {}),
         }
         require(set(commands) == set(PSP["commandPackets"]), "invalid_policy")
         for packet, (function_code, fields) in commands.items():
@@ -543,14 +640,10 @@ class ScenarioRunner:
             "MM_DEBUG": {"REQUEST_ID": 32, "OPERATION": 32, "STATUS": 32, "WIDTH_BYTES": 32,
                          "MODULE_START": 64, "MODULE_END": 64, "POINTER_SLOT": 64,
                          "ADDRESS": 64, "VALUE": 64},
-            "PAYLOAD_PULSE_STATE": {"STATE": 8, "BOUND": 8, "LAST_VALUE": 8,
-                                    "FAULT_LATCH": 8, "PULSE_COUNT": 32, "SLOT_ADDRESS": 32,
-                                    "FEED_TARGET_ADDRESS": 32, "AUTHORIZED_KICK_ADDRESS": 32,
-                                    "BIND_COUNT": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
-            "PAYLOAD_CTRL_STATE": {"MODE": 8, "KICK": 8, "FAULT": 8, "HALT_ACKED": 8,
-                                   "SEEN_TRANSITIONS": 32, "FAULT_COUNT": 32, "KICK_ADDRESS": 32,
-                                   "MODE_ADDRESS": 32, "LAST_FAULT_VALUE": 32,
-                                   "LAST_CONTROL_SEQUENCE": 32},
+            "PAYLOAD_DATA_STATE": {"STATE": 8, "LAST_SAMPLE": 8, "RESERVED": 16,
+                                   "SAMPLE_COUNT": 32, "POINTER_SLOT": 32,
+                                   "WRITE_TARGET_ADDRESS": 32, "BUFFER_ADDRESS": 32,
+                                   "GUARD_ADDRESS": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
         }
         require(set(telemetry) == set(PSP["telemetryPackets"]), "invalid_policy")
         for packet, fields in telemetry.items():
@@ -564,19 +657,6 @@ class ScenarioRunner:
                         for name, size in fields.items()) and
                     all(items[name].get("data_type") == "DERIVED" for name in RECEIPT_ITEMS),
                     "telemetry_definition_mismatch")
-        event = self._call(lambda: self.adapter.telemetry_definition(self.target, PSP["eventPacket"]),
-                           "telemetry_definition")
-        require(type(event) is dict and event.get("target_name") == self.target and
-                event.get("packet_name") == PSP["eventPacket"], "invalid_telemetry_item")
-        event_items = {item["name"]: item for item in event.get("items", [])}
-        require(event_items.get("PACKET_ID_APP_NAME", {}).get("data_type") == "STRING" and
-                event_items.get("PACKET_ID_APP_NAME", {}).get("bit_size") == 160 and
-                event_items.get("PACKET_ID_EVENT_ID", {}).get("data_type") == "UINT" and
-                event_items.get("PACKET_ID_EVENT_ID", {}).get("bit_size") == 16 and
-                event_items.get("MESSAGE", {}).get("data_type") == "STRING" and
-                event_items.get("MESSAGE", {}).get("bit_size") == 976 and
-                all(event_items.get(name, {}).get("data_type") == "DERIVED" for name in RECEIPT_ITEMS),
-                "telemetry_definition_mismatch")
 
     def _preflight_oracle(self):
         packet = ORACLE["command"]
@@ -633,8 +713,7 @@ class ScenarioRunner:
         self.baselines[packet] = (baseline, sent_at)
         self.last_send = self.monotonic()
         timeout = self._remaining(step["timeoutSec"])
-        accepted = self._call(lambda: self.adapter.command(self.target, step["packet"], dict(step["parameters"]), timeout), "command", timeout)
-        require(type(accepted) is dict and accepted.get("target_name") == self.target and accepted.get("cmd_name") == step["packet"], "command_not_accepted")
+        self._send_command(step["packet"], step["parameters"], timeout)
         return {"packet": step["packet"], "commandAccepted": True, "telemetryConfirmed": False}
 
     def _wait_telemetry(self, step):
@@ -694,11 +773,8 @@ class ScenarioRunner:
         self._check_stop()
         self.last_send = self.monotonic()
         timeout = self._remaining(2)
-        accepted = self._call(lambda: self.adapter.command(self.target, ORACLE["command"],
-                                 {"ADDRESS": address, "SIZE": 1, "MAX_BYTES_PER_CYCLE": 1}, timeout),
-                              "command", timeout)
-        require(type(accepted) is dict and accepted.get("target_name") == self.target and
-                accepted.get("cmd_name") == ORACLE["command"], "command_not_accepted")
+        self._send_command(ORACLE["command"],
+                           {"ADDRESS": address, "SIZE": 1, "MAX_BYTES_PER_CYCLE": 1}, timeout)
         end = min(self.deadline, self.monotonic() + step["timeoutSec"])
         for _ in range(math.ceil(step["timeoutSec"] / step["pollIntervalSec"]) + 1):
             if self.monotonic() >= end:
@@ -768,10 +844,7 @@ class ScenarioRunner:
         sent_at = self.wall_time()
         self.last_send = self.monotonic()
         timeout = self._remaining(2)
-        accepted = self._call(lambda: self.adapter.command(self.target, command, parameters, timeout),
-                              "command", timeout)
-        require(type(accepted) is dict and accepted.get("target_name") == self.target and
-                accepted.get("cmd_name") == command, "command_not_accepted")
+        self._send_command(command, parameters, timeout)
         end = min(self.deadline, self.monotonic() + 10)
         for _ in range(41):
             if self.monotonic() >= end:
@@ -831,10 +904,7 @@ class ScenarioRunner:
         self._check_stop()
         self.last_send = self.monotonic()
         timeout = self._remaining(2)
-        accepted = self._call(lambda: self.adapter.command(self.target, "CFE_ES_SEND_HK_CMD", {}, timeout),
-                              "command", timeout)
-        require(type(accepted) is dict and accepted.get("target_name") == self.target and
-                accepted.get("cmd_name") == "CFE_ES_SEND_HK_CMD", "command_not_accepted")
+        self._send_command("CFE_ES_SEND_HK_CMD", {}, timeout)
 
     def _tc_log_phase(self, step):
         phase = step["phase"]
@@ -922,10 +992,7 @@ class ScenarioRunner:
         sent_at = self.wall_time()
         self.last_send = self.monotonic()
         timeout = self._remaining(2)
-        accepted = self._call(lambda: self.adapter.command(self.target, command, arguments, timeout),
-                              "command", timeout)
-        require(type(accepted) is dict and accepted.get("target_name") == self.target and
-                accepted.get("cmd_name") == command, "command_not_accepted")
+        self._send_command(command, arguments, timeout)
         end = min(self.deadline, self.monotonic() + seconds)
         for _ in range(math.ceil(seconds / 0.25) + 1):
             if self.monotonic() >= end:
@@ -956,73 +1023,103 @@ class ScenarioRunner:
         require(status == expected_status, f"debug_status_{status}")
         return sample
 
-    def _psp_pulse(self, command, predicate):
-        fields = ("STATE", "BOUND", "LAST_VALUE", "FAULT_LATCH", "PULSE_COUNT",
-                  "SLOT_ADDRESS", "FEED_TARGET_ADDRESS", "AUTHORIZED_KICK_ADDRESS",
-                  "BIND_COUNT", "LAST_ACTION", "LAST_ERROR")
-        return self._psp_exchange(command, {}, "PAYLOAD_PULSE_STATE", fields, predicate)
+    def _psp_data(self, command, predicate):
+        fields = ("STATE", "LAST_SAMPLE", "RESERVED", "SAMPLE_COUNT", "POINTER_SLOT",
+                  "WRITE_TARGET_ADDRESS", "BUFFER_ADDRESS", "GUARD_ADDRESS",
+                  "LAST_ACTION", "LAST_ERROR")
+        return self._psp_exchange(command, {}, "PAYLOAD_DATA_STATE", fields, predicate)
 
-    def _psp_ctrl(self, command="PAYLOAD_CTRL_STATUS_CMD", predicate=lambda _v: True):
-        fields = ("MODE", "KICK", "FAULT", "HALT_ACKED", "SEEN_TRANSITIONS",
-                  "FAULT_COUNT", "KICK_ADDRESS", "MODE_ADDRESS", "LAST_FAULT_VALUE",
-                  "LAST_CONTROL_SEQUENCE")
-        return self._psp_exchange(command, {}, "PAYLOAD_CTRL_STATE", fields, predicate)
+    def _psp_observer_status(self):
+        require(self.observer is not None, "observer_unavailable")
+        report = self._call(lambda: self.observer.status(self.target), "observer", 25)
+        require(type(report) is dict and
+                {"target", "running", "instance_id", "pid", "last_exit"} <= set(report) and
+                report["target"] == self.target and
+                type(report["running"]) is bool, "invalid_observer_response")
+        instance = report.get("instance_id")
+        pid = report.get("pid")
+        require(instance is None or (type(instance) is str and 0 < len(instance) <= 128),
+                "invalid_observer_response")
+        require(pid is None or (type(pid) is int and 0 < pid <= 0x7fffffff),
+                "invalid_observer_response")
+        if report["running"]:
+            require(instance is not None and pid is not None, "invalid_observer_response")
+        last_exit = report.get("last_exit")
+        if last_exit is not None:
+            require(type(last_exit) is dict and
+                    type(last_exit.get("instance_id")) is str and
+                    0 < len(last_exit["instance_id"]) <= 128 and
+                    type(last_exit.get("signal")) is int and
+                    0 <= last_exit["signal"] <= 127 and
+                    type(last_exit.get("signal_name")) is str and
+                    0 < len(last_exit["signal_name"]) <= 32 and
+                    type(last_exit.get("observed_at")) is str and
+                    0 < len(last_exit["observed_at"]) <= 64,
+                    "invalid_observer_response")
+        return report
 
     def _psp_phase(self, step):
         phase = step["phase"]
         if phase == "baseline":
-            pulse = self._psp_pulse("PAYLOAD_PULSE_STATUS_CMD",
-                                    lambda v: v.get("STATE") == 1 and v.get("BOUND") == 1 and
-                                    v.get("FAULT_LATCH") == 0).values
-            ctrl_sample = self._psp_ctrl(predicate=lambda v: v.get("FAULT") == 0 and
-                                         v.get("HALT_ACKED") == 0)
-            ctrl = ctrl_sample.values
-            kick, mode = ctrl["KICK_ADDRESS"], ctrl["MODE_ADDRESS"]
-            require(all(type(v) is int and 0x10000 <= v <= 0xffffffff for v in (kick, mode)),
-                    "invalid_payload_addresses")
-            require((kick & ~0xff) == (mode & ~0xff) and
-                    (kick & 0xff) == PSP["expectedKickLowByte"] and
-                    (mode & 0xff) == PSP["expectedModeLowByte"], "invalid_payload_layout")
-            require(pulse["AUTHORIZED_KICK_ADDRESS"] == kick and
-                    pulse["FEED_TARGET_ADDRESS"] == kick and type(ctrl["MODE"]) is int and
-                    type(pulse["LAST_VALUE"]) is int and pulse["LAST_VALUE"] != ctrl["MODE"],
-                    "payload_not_ready")
-            self.psp_kick, self.psp_mode = kick, mode
-            self.psp_normal_mode = ctrl["MODE"]
-            self.psp_ctrl_baseline_count = ctrl_sample.count
-            self.psp_pulse_count = pulse["PULSE_COUNT"]
-            self.psp_slot_reported = pulse["SLOT_ADDRESS"]
-            self.psp_pulse_value = pulse["LAST_VALUE"]
-            return {"kick_address": kick, "mode_address": mode, "mode_before": self.psp_normal_mode,
-                    "pulse_count": self.psp_pulse_count, "message": "Controller mode valid; pulse writes normal kick byte",
+            process = self._psp_observer_status()
+            require(process["running"], "cfs_not_running")
+            data = self._psp_data("PAYLOAD_DATA_STATUS_CMD",
+                                  lambda v: v.get("STATE") == 1 and
+                                  type(v.get("SAMPLE_COUNT")) is int and
+                                  v["SAMPLE_COUNT"] > 0 and v.get("LAST_ERROR") == 0).values
+            buffer_address = data["BUFFER_ADDRESS"]
+            guard_address = data["GUARD_ADDRESS"]
+            slot = data["POINTER_SLOT"]
+            require(all(type(v) is int and 0x10000 <= v <= 0xffffffff
+                        for v in (buffer_address, guard_address, slot)) and
+                    buffer_address != guard_address and
+                    data["WRITE_TARGET_ADDRESS"] == buffer_address,
+                    "invalid_payload_layout")
+            self.psp_buffer = buffer_address
+            self.psp_guard = guard_address
+            self.psp_slot_reported = slot
+            self.psp_sample_count = data["SAMPLE_COUNT"]
+            self.psp_process_instance = process["instance_id"]
+            self.psp_pid = process["pid"]
+            return {"buffer_address": buffer_address, "guard_address": guard_address,
+                    "pointer_slot": slot, "sample_count": self.psp_sample_count,
+                    "process_instance": self.psp_process_instance, "pid": self.psp_pid,
+                    "message": "Payload samples are being written to the normal buffer",
                     "commandAccepted": True, "telemetryConfirmed": True}
-        require(hasattr(self, "psp_kick"), "invalid_psp_state")
+        require(hasattr(self, "psp_guard"), "invalid_psp_state")
         if phase == "map":
             values = self._psp_debug("MM_CMD_DEBUG_MAP", {}).values
             start, end, slot = (values[k] for k in ("MODULE_START", "MODULE_END", "POINTER_SLOT"))
             require(all(type(v) is int for v in (start, end, slot)) and
                     0x10000 <= start <= slot and slot + PSP["pointerBytes"] <= end <= 0x100000000 and
                     slot == self.psp_slot_reported, "invalid_debug_map")
-            require(not start <= self.psp_mode < end, "victim_inside_debug_range")
-            self.psp_slot, self.psp_module = slot, (start, end)
+            require(not start <= self.psp_guard < end and
+                    not start <= self.psp_buffer < end, "target_inside_debug_range")
+            self.psp_slot = slot
             return {"module_start": start, "module_end": end, "pointer_slot": slot,
-                    "message": f"MM located PAYLOAD_PULSE_APP writable range and pointer slot 0x{slot:08x}",
+                    "message": f"MM located PAYLOAD_DATA_APP pointer slot 0x{slot:08x}",
                     "commandAccepted": True, "telemetryConfirmed": True}
         require(hasattr(self, "psp_slot"), "invalid_psp_state")
         if phase == "deny-direct-write":
             values = self._psp_debug("MM_CMD_DEBUG_WRITE", {"WIDTH_BYTES": 1,
-                                     "ADDRESS": self.psp_mode, "VALUE": self.psp_normal_mode,
+                                     "ADDRESS": self.psp_buffer, "VALUE": 0,
                                      "RESERVED": 0}, expected_status=3).values
-            require(values["ADDRESS"] == self.psp_mode, "invalid_debug_denial")
-            return {"denied_address": self.psp_mode, "debug_status": 3,
-                    "message": "MM denied direct write to protected controller mode",
+            require(values["ADDRESS"] == self.psp_buffer and values["WIDTH_BYTES"] == 1,
+                    "invalid_debug_denial")
+            return {"denied_address": self.psp_buffer, "debug_status": 3,
+                    "message": "MM denied a direct write outside PAYLOAD_DATA_APP",
                     "commandAccepted": True, "telemetryConfirmed": True}
         if phase == "pause":
-            values = self._psp_pulse("PAYLOAD_PULSE_PAUSE_CMD",
-                                      lambda v: v.get("STATE") == 2 and v.get("LAST_ACTION") == 3).values
-            require(values["FEED_TARGET_ADDRESS"] == self.psp_kick, "pulse_pointer_changed_early")
-            self.psp_pause_count = values["PULSE_COUNT"]
-            return {"pulse_count": values["PULSE_COUNT"], "message": "Pulse writes paused before pointer edit",
+            values = self._psp_data("PAYLOAD_DATA_PAUSE_CMD",
+                                    lambda v: v.get("STATE") == 2 and
+                                    v.get("LAST_ACTION") == 2).values
+            require(values["WRITE_TARGET_ADDRESS"] == self.psp_buffer and
+                    type(values["SAMPLE_COUNT"]) is int and
+                    values["SAMPLE_COUNT"] >= self.psp_sample_count,
+                    "payload_changed_before_pause")
+            self.psp_pause_count = values["SAMPLE_COUNT"]
+            return {"sample_count": self.psp_pause_count,
+                    "message": "Payload sample writes paused before pointer edit",
                     "commandAccepted": True, "telemetryConfirmed": True}
         require(hasattr(self, "psp_pause_count"), "invalid_psp_state")
         if phase == "read-pointer":
@@ -1030,106 +1127,71 @@ class ScenarioRunner:
                                      "ADDRESS": self.psp_slot}).values
             pointer = values["VALUE"]
             require(values["ADDRESS"] == self.psp_slot and values["WIDTH_BYTES"] == 4 and
-                    pointer == self.psp_kick, "pointer_read_mismatch")
+                    pointer == self.psp_buffer, "pointer_read_mismatch")
             self.psp_pointer_before = pointer
             return {"pointer_before": pointer, "pointer_slot": self.psp_slot,
-                    "message": f"Read four-byte pulse pointer 0x{pointer:08x}",
+                    "message": f"Read four-byte payload pointer 0x{pointer:08x}",
                     "commandAccepted": True, "telemetryConfirmed": True}
         require(hasattr(self, "psp_pointer_before"), "invalid_psp_state")
-        if phase == "write-pointer-byte":
-            values = self._psp_debug("MM_CMD_DEBUG_WRITE", {"WIDTH_BYTES": 1,
+        if phase == "write-pointer":
+            values = self._psp_debug("MM_CMD_DEBUG_WRITE", {"WIDTH_BYTES": 4,
                                      "ADDRESS": self.psp_slot,
-                                     "VALUE": self.psp_mode & 0xff, "RESERVED": 0}).values
-            require(values["ADDRESS"] == self.psp_slot and values["WIDTH_BYTES"] == 1,
-                    "pointer_write_mismatch")
-            return {"pointer_slot": self.psp_slot, "byte_before": self.psp_kick & 0xff,
-                    "byte_after": self.psp_mode & 0xff,
-                    "message": "MM changed only the permitted pointer's low byte",
+                                     "VALUE": self.psp_guard, "RESERVED": 0}).values
+            require(values["ADDRESS"] == self.psp_slot and values["WIDTH_BYTES"] == 4 and
+                    values["VALUE"] == self.psp_guard, "pointer_write_mismatch")
+            return {"pointer_slot": self.psp_slot, "pointer_after": self.psp_guard,
+                    "message": "MM wrote the four-byte guard address into the permitted pointer slot",
                     "commandAccepted": True, "telemetryConfirmed": True}
         if phase == "verify-pointer":
             values = self._psp_debug("MM_CMD_DEBUG_READ", {"WIDTH_BYTES": 4,
                                      "ADDRESS": self.psp_slot}).values
-            require(values["VALUE"] == self.psp_mode and values["ADDRESS"] == self.psp_slot,
-                    "pointer_change_unconfirmed")
-            return {"pointer_after": self.psp_mode, "pointer_before": self.psp_pointer_before,
-                    "message": f"Pulse pointer now targets controller mode 0x{self.psp_mode:08x}",
+            require(values["VALUE"] == self.psp_guard and
+                    values["ADDRESS"] == self.psp_slot and
+                    values["WIDTH_BYTES"] == 4, "pointer_change_unconfirmed")
+            return {"pointer_after": self.psp_guard,
+                    "pointer_before": self.psp_pointer_before,
+                    "message": f"Payload pointer now targets guard page 0x{self.psp_guard:08x}",
                     "commandAccepted": True, "telemetryConfirmed": True}
         if phase == "resume":
-            self.psp_es_cursor = self._call(
-                lambda: self.adapter.subscribe_packets(self.target, PSP["eventPacket"]),
-                "event_subscription")
-            require(type(self.psp_es_cursor) is str and 0 < len(self.psp_es_cursor) <= 1024,
-                    "event_subscription_invalid")
-            values = self._psp_pulse("PAYLOAD_PULSE_RESUME_CMD",
-                                      lambda v: v.get("LAST_ACTION") in (4, 5) and
-                                      v.get("STATE") in (1, 3)).values
-            require(values["FEED_TARGET_ADDRESS"] == self.psp_mode, "pulse_target_mismatch")
-            return {"pulse_target": self.psp_mode, "pulse_count": values["PULSE_COUNT"],
-                    "message": "Pulse resumed with redirected target", "commandAccepted": True,
-                    "telemetryConfirmed": True}
-        if phase == "observe-fault":
-            # Controller emits a second STATE after receiving the internal HALT ACK.
-            fields = ("MODE", "KICK", "FAULT", "HALT_ACKED", "FAULT_COUNT",
-                      "LAST_FAULT_VALUE", "MODE_ADDRESS")
-            end = min(self.deadline, self.monotonic() + 12)
-            for _ in range(49):
+            process = self._psp_observer_status()
+            require(process["running"] and
+                    process["instance_id"] == self.psp_process_instance and
+                    not (process["last_exit"] is not None and
+                         process["last_exit"]["instance_id"] == self.psp_process_instance),
+                    "cfs_process_changed_before_resume")
+            if self.last_send is not None:
+                self._delay(max(0, 1 - (self.monotonic() - self.last_send)))
+            self._check_stop()
+            self.last_send = self.monotonic()
+            self._send_command("PAYLOAD_DATA_RESUME_CMD", {}, self._remaining(2))
+            return {"write_target": self.psp_guard,
+                    "message": "Payload sampling resumed; waiting for external process evidence",
+                    "commandAccepted": True, "telemetryConfirmed": False}
+        if phase == "confirm-sigsegv":
+            end = min(self.deadline, self.monotonic() + 60)
+            for _ in range(241):
                 self._check_stop()
-                sample = self._call(lambda: self.adapter.sample_fields(self.target, "PAYLOAD_CTRL_STATE", fields),
-                                    "telemetry")
-                v = sample.values
-                if (not sample.stale and sample.count > self.psp_ctrl_baseline_count and
-                        v.get("FAULT") == 1 and
-                        v.get("HALT_ACKED") == 1 and v.get("MODE_ADDRESS") == self.psp_mode and
-                        v.get("MODE") in (0x5a, 0xa5) and
-                        v.get("LAST_FAULT_VALUE") == v.get("MODE") and
-                        type(v.get("FAULT_COUNT")) is int and v["FAULT_COUNT"] >= 1):
-                    return {"mode_after": v["MODE"], "fault_count": v["FAULT_COUNT"],
-                            "halt_acked": 1, "message": "Controller saw invalid mode, obtained pulse HALT ACK and requested APP_ERROR exit",
-                            "telemetryConfirmed": True}
+                process = self._psp_observer_status()
+                last_exit = process["last_exit"]
+                if last_exit is not None and last_exit["instance_id"] == self.psp_process_instance:
+                    require(last_exit["signal"] == 11 and
+                            last_exit["signal_name"] == "SIGSEGV", "wrong_exit_signal")
+                    try:
+                        observed_at = datetime.fromisoformat(last_exit["observed_at"].replace("Z", "+00:00"))
+                        require(observed_at.tzinfo is not None, "invalid_observer_response")
+                    except ValueError:
+                        raise ScenarioError("invalid_observer_response") from None
+                    return {"process_instance": self.psp_process_instance,
+                            "exit_signal": 11, "signal_name": "SIGSEGV",
+                            "observed_at": last_exit["observed_at"],
+                            "message": "Host observer confirmed SIGSEGV for the original cFS process",
+                            "telemetryConfirmed": False}
+                if process["running"] and process["instance_id"] != self.psp_process_instance:
+                    raise ScenarioError("process_restarted_without_segv")
                 if self.monotonic() >= end:
                     break
                 self.sleep(min(0.25, end - self.monotonic(), self._remaining()))
-            raise ScenarioError("controller_fault_unconfirmed")
-        if phase == "confirm-es-exit":
-            require(hasattr(self, "psp_es_cursor"), "invalid_psp_state")
-            end = min(self.deadline, self.monotonic() + 15)
-            for _ in range(61):
-                self._check_stop()
-                response = self._call(lambda: self.adapter.get_packets(self.psp_es_cursor), "telemetry")
-                require(type(response) in (list, tuple) and len(response) == 2,
-                        "invalid_event_stream")
-                cursor, packets = response
-                require(type(cursor) is str and 0 < len(cursor) <= 1024 and
-                        type(packets) is list and len(packets) <= 256,
-                        "invalid_event_stream")
-                self.psp_es_cursor = cursor
-                for event in packets:
-                    require(type(event) is dict, "invalid_event_stream")
-                    app = event.get("PACKET_ID_APP_NAME")
-                    message = event.get("MESSAGE")
-                    if (event.get("target_name") == self.target and
-                            event.get("packet_name") == PSP["eventPacket"] and
-                            event.get("PACKET_ID_EVENT_ID") == PSP["esExitEventId"] and
-                            type(app) is str and app.rstrip("\x00") == "CFE_ES" and
-                            type(message) is str and
-                            message.rstrip("\x00") == "Exit Application PAYLOAD_CTRL_APP Completed."):
-                        return {"es_event_id": PSP["esExitEventId"],
-                                "es_event_message": message.rstrip("\x00"),
-                                "message": "cFE ES confirmed PAYLOAD_CTRL_APP APP_ERROR cleanup event 14",
-                                "telemetryConfirmed": True}
-                if self.monotonic() >= end:
-                    break
-                self.sleep(min(0.25, end - self.monotonic(), self._remaining()))
-            raise ScenarioError("es_app_error_unconfirmed")
-        if phase == "confirm-pulse":
-            values = self._psp_pulse("PAYLOAD_PULSE_STATUS_CMD",
-                                      lambda v: v.get("STATE") == 3 and v.get("FAULT_LATCH") == 1).values
-            require(values["FEED_TARGET_ADDRESS"] == self.psp_mode and
-                    type(values["PULSE_COUNT"]) is int and values["PULSE_COUNT"] > self.psp_pause_count,
-                    "pulse_survival_unconfirmed")
-            return {"pulse_count": values["PULSE_COUNT"], "pulse_target": values["FEED_TARGET_ADDRESS"],
-                    "message": "Pulse app remains alive and halted after controller fault",
-                    "commandAccepted": True, "telemetryConfirmed": True}
+            raise ScenarioError("sigsegv_unconfirmed")
         raise ScenarioError("invalid_psp_phase")
 
     def run(self):
@@ -1138,6 +1200,9 @@ class ScenarioRunner:
             definition = pin_definition(context, self.catalog, self.expected_hash)
             self.target = context["target"]
             self._context(context)
+            self.execution_mode = context["execution_mode"]
+            if self.execution_mode == "manual":
+                self.max_calls = MANUAL_MAX_CALLS
             try:
                 remote_deadline = datetime.fromisoformat(context["deadline"].replace("Z", "+00:00"))
                 require(remote_deadline.tzinfo is not None, "invalid_deadline")
@@ -1145,10 +1210,17 @@ class ScenarioRunner:
             except (KeyError, TypeError, ValueError):
                 raise ScenarioError("invalid_deadline") from None
             require(seconds > 0, "deadline_exceeded")
-            self.deadline = self.monotonic() + min(definition["timeoutSec"], seconds)
+            limit = MANUAL_TIMEOUT_SEC if self.execution_mode == "manual" else definition["timeoutSec"]
+            self.deadline = self.monotonic() + min(limit, seconds)
+            if self.execution_mode == "manual":
+                self.manual_prompt_deadline = min(remote_deadline.timestamp(),
+                                                  self.wall_time() + MANUAL_TIMEOUT_SEC)
             self._preflight(definition)
             self._emit("started", {"message": "Definition and installed packet validation passed"})
-            for step in definition["steps"]:
+            for index, step in enumerate(definition["steps"]):
+                self.step_id = None
+                if self.execution_mode == "manual" and index > 0:
+                    self._await_manual_step(step)
                 self.step_id = step["id"]
                 self._emit("step", {"step_id": step["id"], "status": "running"})
                 if step["type"] == "command":
@@ -1176,7 +1248,7 @@ class ScenarioRunner:
             elif hasattr(self, "tc_target_index"):
                 message = f"Onboard TC log tc{self.tc_target_index:04d}.log replaced by the demo photo"
             elif hasattr(self, "psp_pointer_before"):
-                message = "MM direct controller write denied; one pulse pointer byte redirected a normal write and controller exited APP_ERROR"
+                message = "MM pointer edit redirected PAYLOAD_DATA_APP to a guard page; host confirmed cFS SIGSEGV"
             else:
                 message = "All steps completed with fresh telemetry"
             self._emit("result", {"status": "succeeded", "message": message})
@@ -1215,7 +1287,11 @@ def run_from_environment():
             os.environ.get("SCENARIO_API_URL", ""), os.environ.get("SCENARIO_RUN_ID", ""),
             OPENC3_SCOPE, running.script_status.name, openc3.script.API_SERVER.json_drb.authentication,
         )
-        return ScenarioRunner(adapter, management, load_catalog(), os.environ.get("SCENARIO_DEFINITION_HASH", "")).run()
+        observer_url = os.environ.get("SCENARIO_OBSERVER_URL", "")
+        observer = ObserverClient(observer_url, os.environ.get("SCENARIO_OBSERVER_TOKEN", "")) if observer_url else None
+        return ScenarioRunner(adapter, management, load_catalog(),
+                              os.environ.get("SCENARIO_DEFINITION_HASH", ""),
+                              observer=observer).run()
     except Exception as error:
         code = str(error) if isinstance(error, ScenarioError) else "bootstrap_error"
         raise ScenarioError(code) from None

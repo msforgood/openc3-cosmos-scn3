@@ -1,0 +1,8 @@
+SCREEN AUTO AUTO 1.0
+VERTICAL
+  TITLE "X-band key app status" Courier 20 Normal true
+  LABELVALUEDESC <%= target_name %> XKEY_HK KEY_ADDRESS "RAM key address:"
+  LABELVALUEDESC <%= target_name %> XKEY_HK KEY_LENGTH "Key bytes:"
+  LABELVALUEDESC <%= target_name %> XKEY_HK CHANNEL_READY "X-band downlink ready:"
+  LABELVALUEDESC <%= target_name %> XKEY_HK FRAMES_SENT "X-band frames sent:"
+END

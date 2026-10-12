@@ -1,0 +1,13 @@
+SCREEN AUTO AUTO 1.0
+
+VERTICAL
+  TITLE "<%= target_name %> Onboard TC Log" Courier 20 Normal true
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS REQUEST_ID "Request ID:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS RESULT "Last operation:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS ACTIVE_INDEX "Active tcNNNN.log:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS LAST_CLOSED_INDEX "Last sealed tcNNNN.log:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS ACTIVE_RECORDS "Records in active file:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS TOTAL_LOGGED "Total ingested records:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS WRITE_ERRORS "Write errors:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_STATUS READ_ERRORS "Read errors:"
+END

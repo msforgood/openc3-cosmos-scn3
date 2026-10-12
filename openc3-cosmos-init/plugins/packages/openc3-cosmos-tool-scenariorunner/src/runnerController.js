@@ -1,6 +1,7 @@
 import { ACTIVE_STATUSES, EVENT_PAGE_SIZE, MAX_LOGS, SerialPoller, STORAGE_PREFIX, errorMessage } from './runtime.js'
 
 const terminal = new Set(['succeeded', 'failed', 'stopped'])
+const activeRunStates = new Set(['launching', 'running', 'waiting', 'stopping', 'unknown'])
 export const START_WAIT_MS = 30000
 export const RECOVERY_DELAYS = [1000, 2000, 5000, 10000, 30000]
 const failedRequest = (run) => run?.state === 'failed' && run.error === 'request_not_accepted'
@@ -45,7 +46,7 @@ export class RunnerController {
   }
   save(value) { try { this.storage.setItem(this.key, JSON.stringify(value)) } catch { /* Storage can be disabled. */ } }
   saved() { try { return JSON.parse(this.storage.getItem(this.key) || 'null') } catch { return null } }
-  persist() { this.save({ runId: this.state.run?.id, pendingRequest: this.state.pendingRequest, requestFailure: this.state.requestFailure }) }
+  persist() { this.save({ runId: this.state.run?.id, runState: this.state.run?.state, pendingRequest: this.state.pendingRequest, requestFailure: this.state.requestFailure }) }
   current(id) { return !this.disposed && this.generation === id }
   async selectTarget(target) {
     if (this.disposed || this.locked) return false
@@ -96,7 +97,12 @@ export class RunnerController {
       let run = result.items.find((item) => !terminal.has(item.state))
       // A list miss is not evidence that a known execution terminated.
       run ||= state.run
-      if (!run && saved?.runId) run = await this.api.run(saved.runId)
+      if (!run && saved?.runId && !terminal.has(saved.runState)) {
+        const recovered = await this.api.run(saved.runId)
+        // A completed run from a previous page visit belongs in history, not in a fresh step list.
+        // An active run saved before refresh may have completed while the page was closed.
+        if (!terminal.has(recovered.state) || activeRunStates.has(saved.runState)) run = recovered
+      }
       if (!this.current(id)) return
       if (run) this.validateRun(run)
       state.recoveryNeeded = false
@@ -150,16 +156,17 @@ export class RunnerController {
       catch (error) { finish(reject, error) }
     })
   }
-  async start(scenario) {
+  async start(scenario, mode = 'automatic') {
     const state = this.state
-    if (this.disposed || this.locked || !scenario || !scenario.supportedTargets.includes(state.target)) return false
+    if (this.disposed || this.locked || !scenario || !scenario.supportedTargets.includes(state.target) ||
+      !['automatic', 'manual'].includes(mode)) return false
     const id = this.generation
     this.poller?.stop()
     this.clearRecoveryTimer()
     state.starting = true; state.error = ''; state.startRejection = ''; state.logs = []; state.steps = {}; state.cursor = 0
     state.run = null; state.prompt = null; state.requestFailure = null
     const request = { scenario_id: scenario.id, definition_version: scenario.version, definition_hash: scenario.definition_hash,
-      target: state.target, request_id: crypto.randomUUID() }
+      target: state.target, request_id: crypto.randomUUID(), ...(mode === 'manual' ? { execution_mode: 'manual' } : {}) }
     state.pendingRequest = request
     this.save({ pendingRequest: request })
     try {
@@ -233,9 +240,10 @@ export class RunnerController {
     } })
     this.poller.start()
   }
-  async action(kind, answer) {
+  async action(kind, answer, promptId) {
     const state = this.state, id = this.generation
-    if (this.disposed || state.acting || !state.run || terminal.has(state.run.state) || (kind !== 'stop' && !state.prompt)) return
+    if (this.disposed || state.acting || !state.run || terminal.has(state.run.state) ||
+      (kind !== 'stop' && (!state.prompt || (promptId && state.prompt.prompt_id !== promptId)))) return
     state.acting = true
     this.actionEpoch++
     const runId = state.run.id

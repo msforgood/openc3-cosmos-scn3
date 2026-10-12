@@ -1,0 +1,21 @@
+<%= cfs_tlm_hdr(target_name, 'PAYLOAD_DATA_STATE', 'Periodic payload data acquisition state') %>
+   APPEND_ITEM STATE 8 UINT "1 active, 2 paused"
+      STATE ACTIVE 1
+      STATE PAUSED 2
+   APPEND_ITEM LAST_SAMPLE 8 UINT "Last simulated payload sample written through the pointer"
+   APPEND_ITEM RESERVED 16 UINT "Reserved; zero"
+   APPEND_ITEM SAMPLE_COUNT 32 UINT "Completed periodic buffer writes"
+   APPEND_ITEM POINTER_SLOT 32 UINT "Runtime address of PAYLOAD_DATA_WritePtr in .data"
+      FORMAT_STRING "0x%08X"
+   APPEND_ITEM WRITE_TARGET_ADDRESS 32 UINT "Current pointer value, possibly modified by MM"
+      FORMAT_STRING "0x%08X"
+   APPEND_ITEM BUFFER_ADDRESS 32 UINT "Original writable payload sample buffer address"
+      FORMAT_STRING "0x%08X"
+   APPEND_ITEM GUARD_ADDRESS 32 UINT "Write-protected page address used by the scenario"
+      FORMAT_STRING "0x%08X"
+   APPEND_ITEM LAST_ACTION 32 UINT "Last payload data application action"
+      STATE START 0
+      STATE SAMPLE 1
+      STATE PAUSE 2
+      STATE RESUME 3
+   APPEND_ITEM LAST_ERROR 32 UINT "Last payload data application error"

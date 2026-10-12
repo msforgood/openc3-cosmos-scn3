@@ -1,30 +1,29 @@
 <template>
-  <section class="telemetry-panel" aria-label="Selected target telemetry">
-    <header class="panel-heading"><h2>{{ target || 'No target' }} · HK / TM</h2>
+  <section class="telemetry-panel" aria-label="선택한 대상의 텔레메트리">
+    <header class="panel-heading"><h2>{{ target || '대상 없음' }} · HK / TM</h2>
       <span :class="['badge', `comm-${commStatus}`]" data-test="communication">{{ communicationLabel }}</span>
     </header>
-    <p class="muted" data-test="receipt">Last packet received: {{ formatTime(lastReceipt) }}</p>
-    <p class="muted small">Receipt time comes from packets referenced by this screen. Delayed if any is older than 10 seconds.</p>
-    <label for="scenario-screen">Read-only telemetry screen</label>
+    <p class="muted" data-test="receipt">마지막 패킷 수신: {{ formatTime(lastReceipt) }}</p>
+    <p class="muted small">이 화면에 표시된 패킷의 수신 시각을 사용합니다. 하나라도 10초 이상 지났다면 지연으로 표시합니다.</p>
+    <label for="scenario-screen">읽기 전용 텔레메트리 화면</label>
     <select id="scenario-screen" v-model="screen" :disabled="!screens.length" data-test="screen-select">
       <option v-for="name in screens" :key="name" :value="name">{{ name }}</option>
     </select>
     <p v-if="error" role="alert" class="error-text">{{ error }}</p>
-    <p v-if="!screens.length && !error" class="empty">No installed telemetry screens for this target.</p>
+    <p v-if="!screens.length && !error" class="empty">이 대상에 설치된 텔레메트리 화면이 없습니다.</p>
     <TelemetryOverview v-if="definition" :target="target" :screen="screen" :rows="overviewRows" :total="selectedItems.total"
       :limits-set="limitsSet" :metadata-error="metadataError" />
     <div v-if="definition" class="screen-container">
-      <h3 class="small muted">Packet screen · {{ screen }}</h3>
-      <p v-if="commStatus !== 'live'" class="telemetry-warning" role="status">{{ communicationLabel }} — displayed values may be unavailable or old.</p>
+      <h3 class="small muted">패킷 화면 · {{ screen }}</h3>
+      <p v-if="commStatus !== 'live'" class="telemetry-warning" role="status">{{ communicationLabel }} — 표시된 값이 없거나 오래된 값일 수 있습니다.</p>
       <div class="screen-item" :class="{ 'screen-stale': commStatus !== 'live' }"
         @contextmenu.capture.stop.prevent @keydown.capture="blockContextKey">
         <Openc3Screen ref="screenRef" :key="`${scope}:${target}:${screen}:${screenRevision}`" :target="target" :screen="screen"
           :definition="definition" :keywords="keywords" :inline="true" :show-close="false" :fix-floated="true" />
       </div>
     </div>
-    <header class="panel-heading limits-heading"><h2>Limits events</h2><span class="muted">{{ limitsConnected ? 'Connected' : 'Disconnected' }}</span></header>
-    <p class="muted small">Read-only · {{ target || 'No target' }} only · latest {{ events.length }} / 1000 events</p>
-    <p v-if="!events.length" class="empty">No limits changes received for this target. This does not establish telemetry health.</p>
+    <header class="panel-heading limits-heading"><h2>Limits 이벤트</h2><span class="muted">{{ limitsConnected ? '연결됨' : '연결 끊김' }}</span></header>
+    <p v-if="!events.length" class="empty">이 대상의 Limits 상태 변경 이벤트가 없습니다. 이 사실만으로 텔레메트리 상태를 판단할 수 없습니다.</p>
     <div class="event-list" data-test="limits-events">
       <article v-for="(event, index) in events" :key="`${event.time_nsec}:${index}`" class="limit-event">
         <time>{{ eventTime(event.time_nsec) }}</time>
@@ -55,7 +54,7 @@ const now = ref(Date.now()), screenRevision = ref(0)
 let generation = 0, screenGeneration = 0, overviewGeneration = 0, disposed = false, monitor, subscription, flushTimer, pendingEvents = []
 const clock = setInterval(() => { now.value = Date.now() }, 1000)
 const commStatus = computed(() => communicationStatus({ connected: connected.value, lastReceipt: freshnessReceipt.value, lastSuccess: lastSuccess.value }, now.value))
-const communicationLabel = computed(() => ({ live: 'Live telemetry', no_data: 'No telemetry data', delayed: 'Telemetry delayed', disconnected: 'Telemetry disconnected' })[commStatus.value])
+const communicationLabel = computed(() => ({ live: '실시간 텔레메트리', no_data: '텔레메트리 데이터 없음', delayed: '텔레메트리 지연', disconnected: '텔레메트리 연결 끊김' })[commStatus.value])
 const selectedItems = computed(() => overviewItems(validatedItems.value, props.telemetryItems))
 const overviewRows = computed(() => selectedItems.value.items.map((item) => {
   const key = itemKey(item), observation = observations.value[key]
@@ -175,7 +174,7 @@ watch(() => [props.target, props.scope], async ([target, scope]) => {
     screens.value = [...new Set(list.data.filter((path) => path.split('/')[0] === target)
       .map((path) => path.split('/').at(-1).replace(/\.[^.]+$/, '').toUpperCase()))].sort()
     screen.value = preferredScreen(screens.value, props.telemetryItems)
-  } catch (cause) { if (current()) error.value = `Unable to load telemetry screens: ${errorMessage(cause)}` }
+  } catch (cause) { if (current()) error.value = `텔레메트리 화면을 불러오지 못했습니다: ${errorMessage(cause)}` }
 }, { immediate: true, flush: 'sync' })
 
 watch(screen, async (name) => {
@@ -193,7 +192,7 @@ watch(screen, async (name) => {
     validatedItems.value = validation.items
     definition.value = result.data
     screenRevision.value++
-  } catch (cause) { if (!disposed && id === screenGeneration) error.value = `Unable to load screen: ${errorMessage(cause)}` }
+  } catch (cause) { if (!disposed && id === screenGeneration) error.value = `화면을 불러오지 못했습니다: ${errorMessage(cause)}` }
 }, { flush: 'sync' })
 watch(() => props.telemetryItems, (items) => {
   const next = preferredScreen(screens.value, items)

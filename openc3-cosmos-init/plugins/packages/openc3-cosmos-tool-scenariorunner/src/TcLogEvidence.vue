@@ -1,18 +1,18 @@
 <template>
-  <section class="tc-log-evidence scenario-preview" aria-label="Onboard TC log evidence" data-test="tc-log-evidence">
-    <h2>Onboard TC log</h2>
-    <p class="muted small">The evidence below comes from the satellite's <code>/cf/log</code> file through CI_LAB telemetry. OpenC3's ground command history is stored separately.</p>
-    <p v-if="targetIndex" class="small">Selected file: <code>/cf/log/tc{{ String(targetIndex).padStart(4, '0') }}.log</code>
-      <span v-if="attack?.filename"> · Camera filename: <code>{{ attack.filename }}</code></span></p>
+  <section class="tc-log-evidence scenario-preview" aria-label="위성 탑재 TC 로그 증거" data-test="tc-log-evidence">
+    <h2>위성 탑재 TC 로그</h2>
+    <p class="muted small">아래 자료는 CI_LAB 텔레메트리를 통해 받은 위성의 <code>/cf/log</code> 파일 내용입니다. OpenC3의 지상 명령 이력은 별도로 저장됩니다.</p>
+    <p v-if="targetIndex" class="small">선택한 파일: <code>/cf/log/tc{{ String(targetIndex).padStart(4, '0') }}.log</code>
+      <span v-if="attack?.filename"> · 카메라 파일명: <code>{{ attack.filename }}</code></span></p>
     <div class="tc-log-evidence-grid">
-      <div><h3>Before camera TC</h3><p class="muted small">{{ before?.file_size ?? '—' }} bytes · TCLOG v1 text</p>
-        <pre data-test="tc-log-before">{{ before?.before_text || 'Waiting for the sealed log readback…' }}</pre>
+      <div><h3>카메라 TC 전</h3><p class="muted small">{{ before?.file_size ?? '—' }}바이트 · TCLOG v1 텍스트</p>
+        <pre data-test="tc-log-before">{{ before?.before_text || '닫힌 로그 파일을 읽을 때까지 대기 중…' }}</pre>
       </div>
-      <div><h3>After camera TC</h3><p class="muted small">{{ after?.file_size ?? '—' }} bytes · PNG signature and bytes (hex)</p>
-        <pre data-test="tc-log-after">{{ after?.after_hex || 'Waiting for the same file readback…' }}</pre>
+      <div><h3>카메라 TC 후</h3><p class="muted small">{{ after?.file_size ?? '—' }}바이트 · PNG 시그니처와 바이트 값(hex)</p>
+        <pre data-test="tc-log-after">{{ after?.after_hex || '같은 파일을 다시 읽을 때까지 대기 중…' }}</pre>
       </div>
     </div>
-    <p v-if="continuity" class="small" data-test="tc-log-continuity">Logging continues in tc{{ String(continuity.active_index).padStart(4, '0') }}.log · {{ continuity.total_logged }} TC packets recorded · {{ continuity.write_errors }} write errors.</p>
+    <p v-if="continuity" class="small" data-test="tc-log-continuity">tc{{ String(continuity.active_index).padStart(4, '0') }}.log에 기록 계속 · TC 패킷 {{ continuity.total_logged }}개 기록 · 쓰기 오류 {{ continuity.write_errors }}건</p>
   </section>
 </template>
 

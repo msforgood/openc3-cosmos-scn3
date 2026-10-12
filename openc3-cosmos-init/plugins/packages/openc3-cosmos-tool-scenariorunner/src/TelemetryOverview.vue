@@ -1,20 +1,20 @@
 <template>
-  <section class="telemetry-overview" aria-label="Displayed telemetry overview" data-test="telemetry-overview">
+  <section class="telemetry-overview" aria-label="표시된 텔레메트리 개요" data-test="telemetry-overview">
     <div class="overview-heading">
-      <h3>Telemetry overview</h3>
-      <span class="small muted" data-test="limits-set">Limits set: <strong>{{ limitsSet || 'Unknown' }}</strong> · read-only</span>
+      <h3>텔레메트리 개요</h3>
+      <span class="small muted" data-test="limits-set">Limits 설정: <strong>{{ limitsSet || '알 수 없음' }}</strong> · 읽기 전용</span>
     </div>
-    <p class="small muted" data-test="overview-scope">{{ target }} / {{ screen }} · {{ rows.length }} of {{ total }} eligible screen items<span v-if="total > rows.length"> (24-row cap)</span></p>
-    <p class="small muted">Counts apply only to these displayed items. Times are packet receipts; trends are observed samples, not limits.</p>
-    <div class="overview-counts" aria-label="Displayed item state counts" data-test="overview-counts">
+    <p class="small muted" data-test="overview-scope">{{ target }} / {{ screen }} · 표시 항목 {{ rows.length }} / {{ total }}개<span v-if="total > rows.length"> (최대 24개)</span></p>
+    <p class="small muted">아래 상태 건수는 표시된 항목만 집계합니다. 시각은 패킷 수신 시각이며, 추세는 관측값을 나타냅니다.</p>
+    <div class="overview-counts" aria-label="표시 항목 상태 건수" data-test="overview-counts">
       <span v-for="entry in summaries" :key="entry.kind" :class="['overview-count', `state-${entry.kind}`]">
         {{ entry.icon }} {{ entry.label }} <strong>{{ counts[entry.kind] }}</strong>
       </span>
     </div>
-    <p v-if="metadataError" class="small error-text" role="status">Limits metadata unavailable; retrying. Values and receipt monitoring continue.</p>
-    <div v-if="rows.length" class="overview-scroll" tabindex="0" aria-label="Telemetry items; scroll for remaining rows">
+    <p v-if="metadataError" class="small error-text" role="status">Limits 메타데이터를 가져올 수 없습니다. 다시 시도하는 동안 값과 수신 상태는 계속 확인합니다.</p>
+    <div v-if="rows.length" class="overview-scroll" tabindex="0" aria-label="텔레메트리 항목 목록, 스크롤하면 나머지 항목 표시">
       <table class="overview-table">
-        <thead><tr><th scope="col">Item / packet receipt</th><th scope="col">Value</th><th scope="col">State</th><th scope="col">Limits / recent samples</th></tr></thead>
+        <thead><tr><th scope="col">항목 / 패킷 수신</th><th scope="col">값</th><th scope="col">상태</th><th scope="col">Limits / 최근 샘플</th></tr></thead>
         <tbody>
           <tr v-for="row in rows" :key="row.key" data-test="overview-row" :data-state="row.status.kind">
             <th scope="row"><strong>{{ row.name }}</strong><span class="small muted">{{ row.packet }}</span><time class="small muted" :datetime="receiptDateTime(row.receipt)">{{ formatTime(row.receipt) }}</time></th>
@@ -22,28 +22,28 @@
             <td><span :class="['overview-state', `state-${row.status.kind}`]" data-test="item-state">{{ row.status.icon }} {{ row.status.label }}</span></td>
             <td>
               <div v-if="row.gauge" class="overview-gauge" :class="{ 'gauge-inactive': !['alarm', 'caution', 'within'].includes(row.status.kind) }" role="img"
-                :aria-label="`${row.gauge.description}; converted value ${row.numeric ?? 'unavailable'}; scale ${row.gauge.min} to ${row.gauge.max}; ${row.gauge.overflow}`" :title="row.gauge.description" data-test="limits-gauge">
+                :aria-label="`${row.gauge.description}; 변환된 값 ${row.numeric ?? '없음'}; 눈금 ${row.gauge.min}~${row.gauge.max}; ${row.gauge.overflow}`" :title="row.gauge.description" data-test="limits-gauge">
                 <div class="gauge-track"><span v-for="(segment, index) in row.gauge.segments" :key="index" :class="`segment-${segment.color}`" :style="{ width: `${segment.width}%` }" /></div>
                 <span v-if="row.gauge.pointer !== null" class="gauge-pointer" :style="{ left: `${row.gauge.pointer}%` }" />
                 <div class="gauge-endpoints"><span>{{ row.gauge.min }}</span><span>{{ row.gauge.max }}</span></div>
               </div>
-              <span v-if="row.gauge" class="small muted gauge-description">{{ row.gauge.description }}<template v-if="row.limits.set !== limitsSet"> · {{ row.limits.set }} fallback</template></span>
-              <strong v-if="row.gauge?.overflow" class="small">{{ row.gauge.overflow }} · pointer clamped</strong>
+              <span v-if="row.gauge" class="small muted gauge-description">{{ row.gauge.description }}<template v-if="row.limits.set !== limitsSet"> · {{ row.limits.set }} 설정 사용</template></span>
+              <strong v-if="row.gauge?.overflow" class="small">{{ row.gauge.overflow }} · 표시 위치를 눈금 끝에 고정함</strong>
               <template v-if="!row.gauge">
-                <svg v-if="row.trend" viewBox="0 0 100 30" class="sample-trend" role="img" :aria-label="`Observed values ${row.trend.min} to ${row.trend.max}, ${row.trend.count} fresh samples; not a normal range`" data-test="sample-trend">
+                <svg v-if="row.trend" viewBox="0 0 100 30" class="sample-trend" role="img" :aria-label="`관측값 ${row.trend.min}~${row.trend.max}, 새 샘플 ${row.trend.count}개; 정상 범위를 뜻하지 않음`" data-test="sample-trend">
                   <polyline :points="row.trend.points" fill="none" stroke="currentColor" stroke-width="1.5" vector-effect="non-scaling-stroke" />
                   <circle v-if="row.trend.count === 1" cx="50" cy="15" r="2" fill="currentColor" />
                 </svg>
-                <span class="small muted gauge-description">{{ row.limits.thresholds ? 'No valid numeric scale' : row.limits.configured ? 'State limits · no numeric range' : row.limits.known ? 'No numeric limits' : 'Limits unknown' }}</span>
-                <span v-if="row.trend" class="small muted gauge-description">Observed {{ row.trend.min }}–{{ row.trend.max }} · {{ row.trend.count }}/30 samples</span>
-                <span v-else class="small muted gauge-description">{{ row.numeric === null ? 'No numeric sample' : 'Waiting for fresh samples' }}</span>
+                <span class="small muted gauge-description">{{ row.limits.thresholds ? '유효한 숫자 눈금 없음' : row.limits.configured ? '상태 Limits · 숫자 범위 없음' : row.limits.known ? '숫자 Limits 없음' : 'Limits 정보 없음' }}</span>
+                <span v-if="row.trend" class="small muted gauge-description">관측값 {{ row.trend.min }}–{{ row.trend.max }} · {{ row.trend.count }}/30개 샘플</span>
+                <span v-else class="small muted gauge-description">{{ row.numeric === null ? '숫자 샘플 없음' : '새 샘플 대기 중' }}</span>
               </template>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <p v-else class="empty">No eligible item references in this screen.</p>
+    <p v-else class="empty">이 화면에 표시할 수 있는 항목 참조가 없습니다.</p>
   </section>
 </template>
 
@@ -58,10 +58,10 @@ function receiptDateTime(receipt) {
   return receipt && Number.isFinite(date.getTime()) ? date.toISOString() : undefined
 }
 const summaries = [
-  { kind: 'alarm', label: 'Alarm', icon: '!' }, { kind: 'caution', label: 'Caution', icon: '△' },
-  { kind: 'within', label: 'Within limits', icon: '✓' }, { kind: 'unconfigured', label: 'No limits', icon: '—' },
-  { kind: 'stale', label: 'Stale', icon: '◷' }, { kind: 'disconnected', label: 'Disconnected', icon: '×' },
-  { kind: 'disabled', label: 'Disabled', icon: '⊘' }, { kind: 'unknown', label: 'Unknown', icon: '?' },
+  { kind: 'alarm', label: '경보', icon: '!' }, { kind: 'caution', label: '주의', icon: '△' },
+  { kind: 'within', label: '정상 범위', icon: '✓' }, { kind: 'unconfigured', label: 'Limits 없음', icon: '—' },
+  { kind: 'stale', label: '오래됨', icon: '◷' }, { kind: 'disconnected', label: '연결 끊김', icon: '×' },
+  { kind: 'disabled', label: '비활성', icon: '⊘' }, { kind: 'unknown', label: '알 수 없음', icon: '?' },
 ]
 </script>
 

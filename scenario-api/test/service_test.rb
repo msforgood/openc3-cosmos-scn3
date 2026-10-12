@@ -1,6 +1,12 @@
 require_relative 'test_helper'
 
 class ServiceTest < ScenarioTest
+  def setup
+    super
+    @catalog = Scenario::Catalog.new(definitions: @catalog.definitions + [housekeeping_fixture])
+    @service = build_service
+  end
+
   def test_persists_run_and_lock_before_launch
     @backend.during_launch = lambda do |run, _|
       persisted = @store.transaction { |s| s.get(run['id']) }
@@ -71,8 +77,78 @@ class ServiceTest < ScenarioTest
     assert_empty @backend.launches
   end
 
-  def test_bbb_crc_oracle_authorizes_one_shot_only_on_its_target
-    definition = @catalog.get('bbb-cs-crc-key-oracle')
+  def test_manual_mode_uses_one_persistent_run_and_allows_step_prompt_until_run_deadline
+    run, code = @service.create(input.merge('execution_mode' => 'manual'), token: TOKEN)
+    assert_equal 201, code
+    assert_equal 'manual', run['execution_mode']
+    assert_equal (@time + 1800).iso8601(6), run['deadline']
+    assert_equal 'manual', @service.context(run['id'], scope: 'DEFAULT', token: TOKEN)['execution_mode']
+    assert_error('invalid_step_prompt') do
+      callback(run, 'prompt', { 'prompt_id' => 'confirm-hk', 'message' => 'Run confirm-hk?',
+                                'choices' => ['continue'], 'deadline' => (@time + 600).iso8601 })
+    end
+    callback(run, 'step', { 'step_id' => 'request-hk', 'status' => 'running' })
+    callback(run, 'command', { 'step_id' => 'request-hk', 'packet' => 'CFE_ES_SEND_HK_CMD',
+                               'parameters_json' => '{}' })
+    callback(run, 'step', { 'step_id' => 'request-hk', 'status' => 'succeeded' })
+    assert_error('invalid_step') do
+      callback(run, 'step', { 'step_id' => 'request-hk', 'status' => 'succeeded' })
+    end
+    prompt = { 'prompt_id' => 'confirm-hk', 'message' => 'Run confirm-hk?',
+               'choices' => ['continue'], 'deadline' => (@time + 600).iso8601 }
+    callback(run, 'prompt', prompt)
+    assert_equal 'waiting', detail(run)['state']
+    assert_error('step_not_authorized') do
+      callback(run, 'step', { 'step_id' => 'confirm-hk', 'status' => 'running' })
+    end
+    @auth.deny = ->(args) { args[:permission] == 'cmd' }
+    assert_error('forbidden') do
+      @service.answer(run['id'], scope: 'DEFAULT', token: TOKEN,
+                      prompt_id: 'confirm-hk', answer: 'continue')
+    end
+    @auth.deny = nil
+    2.times do
+      @service.answer(run['id'], scope: 'DEFAULT', token: TOKEN,
+                      prompt_id: 'confirm-hk', answer: 'continue')
+    end
+    callback(run, 'step', { 'step_id' => 'confirm-hk', 'status' => 'running' })
+    callback(run, 'step', { 'step_id' => 'confirm-hk', 'status' => 'succeeded' })
+    callback(run, 'result', { 'status' => 'succeeded' })
+    assert_equal 'continue', @service.context(run['id'], scope: 'DEFAULT', token: TOKEN).dig('prompt', 'answer')
+    assert_equal 1, @backend.launches.size
+    assert_error('invalid_step_prompt') do
+      callback(run, 'prompt', prompt.merge('prompt_id' => 'request-hk'))
+    end
+    assert_error('invalid_execution_mode') do
+      @service.create(input('request-0002').merge('execution_mode' => 'automatic'), token: TOKEN)
+    end
+  end
+
+  def test_automatic_mode_keeps_short_prompt_limit_and_definition_deadline
+    run = create
+    assert_equal 'automatic', run['execution_mode']
+    assert_equal (@time + 30).iso8601(6), run['deadline']
+    assert_error('invalid_prompt_deadline') do
+      callback(run, 'prompt', { 'prompt_id' => 'confirm-hk', 'message' => 'Continue?',
+                                'choices' => ['continue'], 'deadline' => (@time + 600).iso8601 })
+    end
+  end
+
+  def test_command_event_records_the_defined_step_and_json_parameters
+    run = create
+    data = { 'step_id' => 'request-hk', 'packet' => 'CFE_ES_SEND_HK_CMD',
+             'parameters_json' => '{}' }
+    callback(run, 'command', data)
+    event = @service.events(run['id'], scope: 'DEFAULT', token: TOKEN)['items'].last
+    assert_equal 'command', event['type']
+    assert_equal data, event['data']
+    assert_error('invalid_command_event') { callback(run, 'command', data.merge('step_id' => 'unknown')) }
+    assert_error('invalid_command_event') { callback(run, 'command', data.merge('parameters_json' => '[]')) }
+    assert_error('invalid_command_event') { callback(run, 'command', data.merge('parameters_json' => '{')) }
+  end
+
+  def test_shared_crc_oracle_authorizes_one_shot_on_each_selected_target
+    definition = @catalog.get('cs-crc-key-oracle')
     request = { 'scope' => 'DEFAULT', 'target' => 'CFS-1_BBB', 'scenario_id' => definition['id'],
                 'definition_version' => definition['version'], 'definition_hash' => Scenario::Canonical.hash(definition),
                 'request_id' => 'request-bbb-crc-0001' }
@@ -81,13 +157,18 @@ class ServiceTest < ScenarioTest
     assert_equal 'running', run['state']
     assert_equal 'CFS-1_BBB', @backend.launches.last['target']
     assert @auth.calls.any? { |call| call[:permission] == 'cmd' && call[:target] == 'CFS-1_BBB' && call[:packet] == 'CS_CMD_ONE_SHOT' }
+    qemu, qemu_code = @service.create(request.merge('target' => 'CFS-1_QEMU',
+                                                   'request_id' => 'request-qemu-crc-0002'), token: TOKEN)
+    assert_equal 201, qemu_code
+    assert_equal 'CFS-1_QEMU', qemu['target']
+    assert @auth.calls.any? { |call| call[:permission] == 'cmd' && call[:target] == 'CFS-1_QEMU' && call[:packet] == 'CS_CMD_ONE_SHOT' }
     assert_error('unsupported_target') do
-      @service.create(request.merge('target' => 'CFS-1_QEMU', 'request_id' => 'request-bbb-crc-0002'), token: TOKEN)
+      @service.create(request.merge('target' => 'OTHER', 'request_id' => 'request-bad-crc-0003'), token: TOKEN)
     end
   end
 
   def test_xband_authentication_callback_is_bound_to_verification_step
-    definition = @catalog.get('qemu-cs-crc-key-oracle')
+    definition = @catalog.get('cs-crc-key-oracle')
     request = input.merge('scenario_id' => definition['id'],
                           'definition_version' => definition['version'],
                           'definition_hash' => Scenario::Canonical.hash(definition))

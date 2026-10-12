@@ -11,8 +11,10 @@ module Scenario
     def initialize(path: nil, definitions: nil, policy_path: nil)
       raise Error.new('catalog_too_large') if path && File.size(path) > 65_536
       policy_path ||= File.join(path ? File.dirname(path) : File.expand_path('../../config', __dir__), 'safety_policy.json')
-      @policy = JSON.parse(File.read(policy_path, encoding: 'UTF-8'))
-      @definitions = definitions || JSON.parse(File.read(path, encoding: 'UTF-8'))
+      # OpenC3 sets Ruby's default internal encoding to BINARY. Read UTF-8 JSON
+      # without implicit transcoding so localized scenario names remain valid.
+      @policy = JSON.parse(File.binread(policy_path).force_encoding(Encoding::UTF_8))
+      @definitions = definitions || JSON.parse(File.binread(path).force_encoding(Encoding::UTF_8))
       raise Error.new('invalid_catalog') unless @definitions.is_a?(Array) && @definitions.size.between?(1, 32)
       raise Error.new('catalog_too_large') if Canonical.json(@definitions).bytesize > 65_536
       check(@definitions.all? { |d| d.is_a?(Hash) })
@@ -39,14 +41,18 @@ module Scenario
       definition_id!(d['id'])
       check(d['version'].is_a?(String) && d['version'].length <= 32 && /\A[0-9]+\.[0-9]+\.[0-9]+\z/.match?(d['version']))
       { 'name' => 120, 'description' => 1000 }.each { |key, max| check(d[key].is_a?(String) && d[key].length.between?(1, max)) }
-      check(d['supportedTargets'].is_a?(Array) && d['supportedTargets'].size == 1 && @policy.fetch('allowedTargets').include?(d['supportedTargets'][0]))
-      if d['supportedTargets'][0] == 'CFS-1_BBB'
-        check([@policy.fetch('tcLogTraversal').fetch('scenarioIds').fetch('CFS-1_BBB'),
-               @policy.fetch('pspIndirectWrite').fetch('scenarioIds').fetch('CFS-1_BBB'),
-               @policy.fetch('crcKeyOracle').fetch('scenarioTargets').key(d['supportedTargets'][0])].include?(d['id']))
+      targets = d['supportedTargets']
+      allowed_targets = @policy.fetch('allowedTargets')
+      check(targets.is_a?(Array) && targets.size.between?(1, allowed_targets.size) &&
+            targets.uniq == targets && (targets - allowed_targets).empty?)
+      if targets.include?('CFS-1_BBB')
+        check([@policy.fetch('tcLogTraversal').fetch('scenarioId'),
+               @policy.fetch('pspIndirectWrite').fetch('scenarioId'),
+               @policy.fetch('crcKeyOracle').fetch('scenarioId')].include?(d['id']))
       end
       number!(d['timeoutSec'], 1, 120)
-      check(d['successCriteria'] == { 'type' => 'allStepsSucceeded', 'requireFreshTelemetry' => true })
+      is_psp = d['steps'].is_a?(Array) && d['steps'].any? { |step| step.is_a?(Hash) && step['type'] == 'pspPhase' }
+      check(d['successCriteria'] == { 'type' => 'allStepsSucceeded', 'requireFreshTelemetry' => !is_psp })
       check(d['telemetryItems'].is_a?(Array) && d['telemetryItems'].size.between?(1, 20))
       refs = d['telemetryItems'].map { |t| reference!(t) }
       check(refs.uniq.size == refs.size)
@@ -94,8 +100,8 @@ module Scenario
     def validate_crc_oracle!(definition, refs)
       policy = @policy.fetch('crcKeyOracle')
       steps = definition['steps']
-      target = policy.fetch('scenarioTargets')[definition['id']]
-      check(target && definition['supportedTargets'] == [target] && definition['timeoutSec'] == 120)
+      check(definition['id'] == policy.fetch('scenarioId') &&
+            definition['supportedTargets'] == @policy.fetch('allowedTargets') && definition['timeoutSec'] == 120)
       check(steps.size == policy.fetch('keyBytes') + 2)
       check(refs.sort == [
         [policy.fetch('keyPacket'), policy.fetch('keyAddressItem')],
@@ -122,8 +128,8 @@ module Scenario
 
     def validate_tc_log!(definition, refs)
       policy = @policy.fetch('tcLogTraversal')
-      target = definition['supportedTargets'].first
-      check(definition['id'] == policy.fetch('scenarioIds')[target] && definition['timeoutSec'] == 120)
+      check(definition['id'] == policy.fetch('scenarioId') &&
+            definition['supportedTargets'] == @policy.fetch('allowedTargets') && definition['timeoutSec'] == 120)
       check(refs.sort == [['CI_LOG_STATUS', 'RESULT'], ['CI_LOG_CHUNK', 'RESULT'], ['TC_CAMERA_RESULT', 'STATUS']].sort)
       phases = policy.fetch('phases')
       check(definition['steps'].size == phases.size)
@@ -135,11 +141,11 @@ module Scenario
 
     def validate_psp!(definition, refs)
       policy = @policy.fetch('pspIndirectWrite')
-      target = definition['supportedTargets'].first
-      check(definition['id'] == policy.fetch('scenarioIds')[target] && definition['timeoutSec'] == 120)
+      check(definition['id'] == policy.fetch('scenarioId') &&
+            definition['supportedTargets'] == @policy.fetch('allowedTargets') && definition['timeoutSec'] == 120)
       check(refs.sort == [['MM_DEBUG', 'STATUS'], ['MM_DEBUG', 'POINTER_SLOT'],
-                          ['PAYLOAD_PULSE_STATE', 'STATE'], ['PAYLOAD_PULSE_STATE', 'FEED_TARGET_ADDRESS'],
-                          ['PAYLOAD_CTRL_STATE', 'FAULT'], ['PAYLOAD_CTRL_STATE', 'HALT_ACKED']].sort)
+                          ['PAYLOAD_DATA_STATE', 'STATE'], ['PAYLOAD_DATA_STATE', 'WRITE_TARGET_ADDRESS'],
+                          ['PAYLOAD_DATA_STATE', 'GUARD_ADDRESS'], ['PAYLOAD_DATA_STATE', 'SAMPLE_COUNT']].sort)
       phases = policy.fetch('phases')
       check(definition['steps'].size == phases.size)
       definition['steps'].zip(phases).each do |step, phase|

@@ -1,0 +1,39 @@
+<% require 'cfs_packet_headers' %>
+<% require 'cfs_globals' %>
+<% require 'cfs_intf_configs' %>
+<% require 'cfs_fleet_globals' %>
+
+VARIABLE cfs_eds_enabled false
+<% cfs_globals_set_eds_enabled(cfs_eds_enabled) %>
+VARIABLE cfs_mem_addr_size 32
+<% cfs_globals_set_mem_addr_size(cfs_mem_addr_size) %>
+VARIABLE cfs_endianness LITTLE_ENDIAN
+<% cfs_globals_set_endianness(cfs_endianness) %>
+VARIABLE cfs_bbb_cmd_ip 192.168.7.2
+VARIABLE cfs_qemu_cmd_ip qemu-cfs
+VARIABLE cfs_bbb_tlm_output_ip 192.168.7.1
+VARIABLE cfs_qemu_tlm_output_ip 172.21.0.2
+
+<% cfs_fleet_target_names.each do |instance_target| %>
+    TARGET CFS <%= instance_target %>
+    INTERFACE <%= instance_target %>_INTF udp_interface.rb &
+        <%= instance_target.end_with?('_BBB') ? cfs_bbb_cmd_ip : cfs_qemu_cmd_ip %> &
+        <%= cfs_get_port_num_cmd(instance_target) %> &
+        <%= cfs_get_port_num_tlm(instance_target) %> &
+        nil nil 128 nil nil
+        MAP_TARGET <%= instance_target %>
+        PROTOCOL WRITE ProtocolCcsdsChecksum
+        PROTOCOL WRITE ProtocolCcsdsLength
+        PROTOCOL READ LengthProtocol 32 16 7 1 BIG_ENDIAN 0 nil
+        PROTOCOL READ ProtocolEvsLog
+
+    # X-band frames use an independent, non-CCSDS UDP channel. Keep them on
+    # a telemetry-only target so the CFS packet decoder cannot claim them.
+    TARGET CFS_XBAND <%= instance_target %>_XBAND
+    INTERFACE <%= instance_target %>_XBAND_INTF udp_interface.rb &
+        nil nil <%= cfs_get_port_num_xband(instance_target) %> &
+        nil nil 128 nil nil
+        MAP_TLM_TARGET <%= instance_target %>_XBAND
+<% end %>
+
+TARGET CFS_FLEET CFS_FLEET

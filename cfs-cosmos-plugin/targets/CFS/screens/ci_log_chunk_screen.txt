@@ -1,0 +1,12 @@
+SCREEN AUTO AUTO 1.0
+
+VERTICAL
+  TITLE "<%= target_name %> Sealed TC Log Readback" Courier 20 Normal true
+  LABELVALUEDESC <%= target_name %> CI_LOG_CHUNK REQUEST_ID "Request ID:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_CHUNK RESULT "Read result:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_CHUNK FILE_INDEX "tcNNNN.log index:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_CHUNK OFFSET "Offset:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_CHUNK DATA_LENGTH "Valid bytes:"
+  LABELVALUEDESC <%= target_name %> CI_LOG_CHUNK FILE_SIZE "File size:"
+  LABEL "Raw DATA bytes are available in Packet Viewer and Scenario Runner."
+END

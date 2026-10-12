@@ -1,0 +1,1 @@
+# Dedicated target for the non-CCSDS X-band laboratory telemetry stream.
