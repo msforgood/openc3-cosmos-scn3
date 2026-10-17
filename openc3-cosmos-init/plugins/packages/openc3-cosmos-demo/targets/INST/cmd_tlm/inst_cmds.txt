@@ -257,3 +257,18 @@ COMMAND <%= target_name %> HYBRIDCMD BIG_ENDIAN "Hybrid Accessor Command"
     HIDDEN
   APPEND_STRUCTURE CBOR 0 CMD <%= target_name %> CBORSTRUCT
     VARIABLE_BIT_SIZE CBOR_LENGTH
+
+COMMAND <%= target_name %> ATT_CTRL BIG_ENDIAN "Change the attitude control mode"
+  VALIDATOR inst_cmd_validator.rb
+  <%= render "_ccsds_cmd.txt", locals: {id: 16} %>
+  PARAMETER    MODE           64   8  UINT 0 2 0 "Attitude control mode"
+    REQUIRED
+    STATE SUN_POINTING 0
+    STATE NADIR 1
+    STATE TARGET 2
+  RELATED_ITEM <%= target_name %> HEALTH_STATUS ATT_MODE
+
+COMMAND <%= target_name %> DOWNLINK_MSG BIG_ENDIAN "Request downlink of the stored ground station message (sent 5 times, 1 second apart)"
+  VALIDATOR inst_cmd_validator.rb
+  <%= render "_ccsds_cmd.txt", locals: {id: 15} %>
+  RELATED_ITEM <%= target_name %> MESSAGE TEXT

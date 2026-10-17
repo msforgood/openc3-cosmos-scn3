@@ -47,7 +47,7 @@ class OpenC3AdapterTest < ScenarioTest
         'PAYLOAD_DATA_STATE' => { 'STATE' => 8, 'LAST_SAMPLE' => 8, 'RESERVED' => 16,
                                   'SAMPLE_COUNT' => 32, 'POINTER_SLOT' => 32,
                                   'WRITE_TARGET_ADDRESS' => 32, 'BUFFER_ADDRESS' => 32,
-                                  'GUARD_ADDRESS' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32 }
+                                  'RESERVED_WORD' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32 }
       }
       if psp_telemetry.key?(name)
         items.reject! { |item| psp_telemetry[name].key?(item['name']) }

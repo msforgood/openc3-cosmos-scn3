@@ -11,7 +11,7 @@ module Scenario
     RUNNER_TERMINAL = %w[completed completed_errors stopped crashed killed].freeze
     PUBLIC_FIELDS = %w[id scope target scenario_id definition_version definition_hash request_id state script_id created_at updated_at deadline stop_requested termination_confirmed prompt result error execution_mode].freeze
     CALLBACK_TYPES = %w[started step command log prompt result].freeze
-    DATA_KEYS = %w[step_id status commandAccepted telemetryConfirmed authenticated packet parameters_json item value received_at message prompt_id choices deadline level file_index file_size before_text before_hex after_hex photo_bytes active_index total_logged write_errors filename module_start module_end pointer_slot denied_address debug_status pointer_before pointer_after buffer_address guard_address sample_count write_target process_instance pid exit_signal signal_name observed_at].freeze
+    DATA_KEYS = %w[step_id status commandAccepted telemetryConfirmed authenticated packet parameters_json item value received_at message prompt_id choices deadline level file_index file_size before_text before_hex after_text after_hex photo_bytes active_index total_logged write_errors filename module_start module_end pointer_slot denied_address debug_status pointer_before pointer_after buffer_address guard_address code_address sample_count write_target process_instance pid exit_signal signal_name observed_at].freeze
 
     def initialize(store:, catalog:, backend:, auth:, clock: -> { Time.now.utc }, max_active: 4)
       @store, @catalog, @backend, @auth, @clock, @max_active = store, catalog, backend, auth, clock, max_active
@@ -432,6 +432,12 @@ module Scenario
         %w[MM_CMD_DEBUG_MAP MM_CMD_DEBUG_READ MM_CMD_DEBUG_WRITE PAYLOAD_DATA_PAUSE_CMD PAYLOAD_DATA_RESUME_CMD PAYLOAD_DATA_STATUS_CMD].each do |packet|
           authorize!(scope, target, token, 'cmd', packet)
         end
+      end
+      if definition['steps'].any? { |step| step['type'] == 'schedulePhase' }
+        # The runner saves the TC sequence script and registers it on the Calendar.
+        authorize!(scope, target, token, 'script_edit')
+        authorize!(scope, target, token, 'script_run')
+        %w[ATT_CTRL COLLECT].each { |packet| authorize!(scope, target, token, 'cmd', packet) }
       end
       definition['telemetryItems'].each { |item| authorize!(scope, target, token, 'tlm', item['packet']) }
     end

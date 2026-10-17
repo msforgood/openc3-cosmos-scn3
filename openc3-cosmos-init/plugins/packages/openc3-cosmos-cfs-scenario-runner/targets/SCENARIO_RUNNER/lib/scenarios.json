@@ -285,9 +285,9 @@
   {
     "schemaVersion": 1,
     "id": "psp-mm-indirect-write",
-    "version": "2.0.0",
+    "version": "2.1.0",
     "name": "03. MM 포인터 변경",
-    "description": "MM locates PAYLOAD_DATA_APP and permits writes only within its loaded module. A four-byte write changes its data-buffer pointer to an unmapped guard page. After the sampling app resumes, the host observer confirms that the same cFS process exits with SIGSEGV.",
+    "description": "MM locates PAYLOAD_DATA_APP and permits writes only within its loaded module. A four-byte write changes its data-buffer pointer to the app's existing read-only code region. After the sampling app resumes, the host observer confirms that the same cFS process exits with SIGSEGV.",
     "supportedTargets": [
       "CFS-1_QEMU",
       "CFS-1_BBB"
@@ -350,6 +350,10 @@
         "item": "POINTER_SLOT"
       },
       {
+        "packet": "MM_DEBUG",
+        "item": "ADDRESS"
+      },
+      {
         "packet": "PAYLOAD_DATA_STATE",
         "item": "STATE"
       },
@@ -359,16 +363,67 @@
       },
       {
         "packet": "PAYLOAD_DATA_STATE",
-        "item": "GUARD_ADDRESS"
-      },
-      {
-        "packet": "PAYLOAD_DATA_STATE",
         "item": "SAMPLE_COUNT"
       }
     ],
     "successCriteria": {
       "type": "allStepsSucceeded",
       "requireFreshTelemetry": false
+    }
+  },
+  {
+    "schemaVersion": 1,
+    "id": "ground-station-tc-schedule",
+    "version": "1.0.0",
+    "name": "04. 지상국 운영 TC 시퀀스 예약",
+    "description": "INST의 자세 모드 변경·탑재체 수집·HK 수신 TC를 실행할 스크립트를 만들고, GROUND_OPS Calendar에 약 5분 뒤 실행하도록 예약합니다.",
+    "supportedTargets": [
+      "INST"
+    ],
+    "timeoutSec": 60,
+    "steps": [
+      {
+        "id": "check-link",
+        "type": "schedulePhase",
+        "phase": "check-link"
+      },
+      {
+        "id": "create-sequence",
+        "type": "schedulePhase",
+        "phase": "create-sequence"
+      },
+      {
+        "id": "schedule-sequence",
+        "type": "schedulePhase",
+        "phase": "schedule-sequence"
+      },
+      {
+        "id": "verify-schedule",
+        "type": "schedulePhase",
+        "phase": "verify-schedule"
+      }
+    ],
+    "telemetryItems": [
+      {
+        "packet": "HEALTH_STATUS",
+        "item": "CMD_ACPT_CNT"
+      },
+      {
+        "packet": "HEALTH_STATUS",
+        "item": "ATT_MODE"
+      },
+      {
+        "packet": "MESSAGE",
+        "item": "SEQ"
+      },
+      {
+        "packet": "MESSAGE",
+        "item": "TEXT"
+      }
+    ],
+    "successCriteria": {
+      "type": "allStepsSucceeded",
+      "requireFreshTelemetry": true
     }
   }
 ]

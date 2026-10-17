@@ -11,7 +11,7 @@
 3. 이 체크아웃에서 `docker compose -p openc3-cosmos-scn3 -f compose.yaml build openc3-cosmos-init scenario-api`를 실행한다. 기존 `scenario-api`를 중지하고 SQLite DB를 백업한다. 기존 Runner 1.0.8에서 전환할 때만 `SCENARIO_UPGRADE_FROM=1.0.8`을 지정해 `/openc3/scenario/autoinstall.rb`를 실행한다. 두 Scenario gem이 설치됐다는 출력을 확인한 뒤 `scenario-api`를 1.0.9 이미지로 재시작한다.
 4. OpenC3에서 두 대상의 `TO_LAB_CMD_ENABLE_OUTPUT`을 보내 TM 수신을 활성화한다. [Scenario Runner](http://localhost:2900/tools/scenariorunner)에서 대상을 고르고 `TC log photo path traversal`을 선택해 시작한다.
 
-절차는 이전 로그 봉인, 정상 사진 TC 기록, 대상 로그 봉인, 공격 전 READ, `../log/tcNNNN.log` 사진 TC, 공격 후 READ, 다음 파일의 로그 지속 확인까지 7단계다. 화면의 **Onboard TC log**에는 같은 `/cf/log/tcNNNN.log`에 대한 공격 전 TCLOG 텍스트와 공격 후 PNG HEX가 나란히 표시된다. 지상 OpenC3 명령 이력은 별도로 유지된다.
+절차는 이전 로그 봉인, 정상 사진 TC 기록, 대상 로그 봉인, 공격 전 READ, `../log/tcNNNN.log` 사진 TC, 공격 후 READ, 다음 파일의 로그 지속 확인까지 7단계다. 현재 통합 Runner 화면의 **Onboard TC log**에는 같은 `/cf/log/tcNNNN.log`에 대한 공격 전 TCLOG 텍스트와 공격 후 PNG 바이트를 ASCII로 해석한 텍스트가 나란히 표시된다. 해석할 수 없는 바이트는 대체 문자 `�`로 표시되므로, 덮어쓴 로그가 글자로는 읽을 수 없는 내용을 담고 있음을 볼 수 있다. 지상 OpenC3 명령 이력은 별도로 유지된다.
 
 ## 실장비 검증
 

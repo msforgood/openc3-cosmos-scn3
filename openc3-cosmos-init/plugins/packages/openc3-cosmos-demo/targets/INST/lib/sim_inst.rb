@@ -32,6 +32,10 @@ module OpenC3
   # the telemetry to simulate an active target.
   class SimInst < SimulatedTarget
     SOLAR_PANEL_DFLTS = [-179.0, 179.0, -179.0, 179.0, -95.0] unless defined? SOLAR_PANEL_DFLTS
+    # Message downlinked in response to DOWNLINK_MSG
+    DOWNLINK_MESSAGE = 'flag{ground_station_telecommand_highjaking}' unless defined? DOWNLINK_MESSAGE
+    DOWNLINK_COUNT = 5 unless defined? DOWNLINK_COUNT # Number of MESSAGE packets per request
+    DOWNLINK_PERIOD = 100 unless defined? DOWNLINK_PERIOD # 1 second in 100Hz counts
 
     def initialize(target_name)
       super(target_name)
@@ -132,6 +136,13 @@ module OpenC3
       packet.enable_method_missing
       packet.CcsdsSeqFlags = 'NOGROUP'
       packet.CcsdsLength = packet.buffer.length - 7
+
+      packet = @tlm_packets['MESSAGE']
+      packet.enable_method_missing
+      packet.CcsdsSeqFlags = 'NOGROUP'
+      packet.CcsdsLength = packet.buffer.length - 7
+      @downlink_remaining = 0
+      @downlink_next_count = nil
 
       @solar_panel_positions = SOLAR_PANEL_DFLTS.dup
       @solar_panel_thread = nil
@@ -265,6 +276,14 @@ module OpenC3
         html_packet.buffer = packet.buffer
       when 'HYBRIDCMD'
         hybrid_packet.buffer = packet.buffer
+      when 'ATT_CTRL'
+        hs_packet.cmd_acpt_cnt += 1
+        hs_packet.att_mode = packet.read('mode')
+      when 'DOWNLINK_MSG'
+        hs_packet.cmd_acpt_cnt += 1
+        # (Re)start the downlink, the first MESSAGE goes out on the next read
+        @downlink_next_count = nil
+        @downlink_remaining = DOWNLINK_COUNT
       end
     end
 
@@ -433,6 +452,22 @@ module OpenC3
           packet.timesec = time.tv_sec - @time_offset
           packet.timeus = time.tv_usec
           packet.ccsdsseqcnt += 1
+        end
+      end
+
+      # Downlink the stored message once a second after DOWNLINK_MSG
+      if @downlink_remaining > 0
+        @downlink_next_count ||= count_100hz
+        if count_100hz >= @downlink_next_count
+          packet = @tlm_packets['MESSAGE']
+          packet.seq = DOWNLINK_COUNT - @downlink_remaining + 1
+          packet.text = DOWNLINK_MESSAGE
+          packet.timesec = time.tv_sec - @time_offset
+          packet.timeus = time.tv_usec
+          packet.ccsdsseqcnt += 1
+          pending_packets << packet
+          @downlink_remaining -= 1
+          @downlink_next_count = count_100hz + DOWNLINK_PERIOD
         end
       end
 

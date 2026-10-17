@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ targets: vi.fn(), api: { scenarios: vi.fn(), r
 vi.mock('../src/scenarioApi.js', () => ({ createScenarioApi: () => mocks.api }))
 vi.mock('@openc3/js-common/services', () => ({ OpenC3Api: class { get_target_names() { return mocks.targets() } } }))
 vi.mock('@openc3/vue-common/components', () => ({ TopBar: { template: '<div />' } }))
-vi.mock('../src/TelemetryPanel.vue', () => ({ default: { props: ['target', 'scope', 'telemetryItems'], template: '<div data-test="telemetry-target">{{ target }}</div>' } }))
+vi.mock('../src/TelemetryPanel.vue', () => ({ default: { props: ['target', 'scope', 'telemetryItems', 'allowedScreens'], template: '<div data-test="telemetry-target">{{ target }}</div>' } }))
 import ScenarioRunner from '../src/ScenarioRunner.vue'
 import TelemetryPanel from '../src/TelemetryPanel.vue'
 
@@ -127,7 +127,7 @@ it('shows planned TC packets and parameter values before execution, including dy
   const pointer = wrapper.get('[data-test="step-command-plan-pointer"]').text()
   expect(pointer).toContain('MM_CMD_DEBUG_WRITE')
   expect(pointer).toContain('"WIDTH_BYTES": 4')
-  expect(pointer).toContain('GUARD_ADDRESS (baseline 단계 PAYLOAD_DATA_STATE)')
+  expect(pointer).toContain('MM_DEBUG_MAP.ADDRESS (map 단계 쓰기 금지 코드 영역)')
   expect(pointer).toContain('POINTER_SLOT (map 단계 결과)')
   const byte = wrapper.get('[data-test="step-command-plan-byte"]').text()
   expect(byte).toContain('CS_CMD_ONE_SHOT')
@@ -276,6 +276,28 @@ it('shows the same three scenarios in catalog order for QEMU and BBB', async () 
   expect(scenarioLabels()).toEqual(labels)
 })
 
+it.each(['CFS-1_QEMU', 'CFS-1_BBB'])('selects scenario-specific telemetry screens on %s', async (target) => {
+  localStorage.clear()
+  localStorage.setItem(`${STORAGE_PREFIX}.DEFAULT.target`, target)
+  mocks.targets.mockResolvedValue(['CFS-1_QEMU', 'CFS-1_BBB'])
+  const sharedTargets = ['CFS-1_QEMU', 'CFS-1_BBB']
+  mocks.api.scenarios.mockResolvedValue({ items: [
+    { id: 'cs-crc-key-oracle', supportedTargets: sharedTargets, steps: [], telemetryItems: [] },
+    { id: 'tc-log-photo-traversal', supportedTargets: sharedTargets, steps: [], telemetryItems: [] },
+    { id: 'psp-mm-indirect-write', supportedTargets: sharedTargets, steps: [], telemetryItems: [] },
+  ] })
+  await render()
+  const panel = () => wrapper.findComponent(TelemetryPanel)
+  expect(panel().props('target')).toBe(target)
+  expect(panel().props('allowedScreens')).toEqual(['CS_HK_TLM_SCREEN', 'XKEY_HK_SCREEN'])
+  await wrapper.get('[data-test="scenario-select"]').setValue('tc-log-photo-traversal'); await flushPromises()
+  expect(panel().props('allowedScreens')).toEqual([
+    'CI_LOG_STATUS_SCREEN', 'CI_LOG_CHUNK_SCREEN', 'TC_CAMERA_RESULT_SCREEN',
+  ])
+  await wrapper.get('[data-test="scenario-select"]').setValue('psp-mm-indirect-write'); await flushPromises()
+  expect(panel().props('allowedScreens')).toBeNull()
+})
+
 it.each(['CFS-1_QEMU', 'CFS-1_BBB'])('starts the same shared definition on %s', async (target) => {
   localStorage.clear()
   localStorage.setItem(`${STORAGE_PREFIX}.DEFAULT.target`, target)
@@ -356,10 +378,16 @@ it('filters shared scenarios by support and permissions when switching targets',
   await render()
   expect(scenarioNames()).toEqual(['cs-crc-key-oracle'])
   expect(wrapper.findComponent(TelemetryPanel).props('telemetryItems')).toEqual([{ packet: 'HK', item: 'VALUE' }])
+  expect(wrapper.findComponent(TelemetryPanel).props('allowedScreens')).toEqual(['CS_HK_TLM_SCREEN', 'XKEY_HK_SCREEN'])
   await wrapper.get('[data-test="target-select"]').setValue('CFS-1_BBB'); await flushPromises()
   expect(scenarioNames()).toEqual(['cs-crc-key-oracle', 'tc-log-photo-traversal'])
   expect(wrapper.findComponent(TelemetryPanel).props('target')).toBe('CFS-1_BBB')
   expect(wrapper.findComponent(TelemetryPanel).props('telemetryItems')).toEqual([{ packet: 'HK', item: 'VALUE' }])
+  expect(wrapper.findComponent(TelemetryPanel).props('allowedScreens')).toEqual(['CS_HK_TLM_SCREEN', 'XKEY_HK_SCREEN'])
+  await wrapper.get('[data-test="scenario-select"]').setValue('tc-log-photo-traversal'); await flushPromises()
+  expect(wrapper.findComponent(TelemetryPanel).props('allowedScreens')).toEqual([
+    'CI_LOG_STATUS_SCREEN', 'CI_LOG_CHUNK_SCREEN', 'TC_CAMERA_RESULT_SCREEN',
+  ])
   expect(wrapper.get('[data-test="start"]').element.disabled).toBe(false)
   expect(mocks.api.start).not.toHaveBeenCalled()
 })

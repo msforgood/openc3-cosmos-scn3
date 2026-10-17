@@ -52,6 +52,11 @@
           </div>
           <p v-else class="muted small">새 X-band frame 인증이 끝나면 Decrypted flag가 표시됩니다.</p>
         </div>
+        <div v-if="isScheduleScenario" class="scenario-preview" data-test="schedule-evidence">
+          <strong>예약된 TC 시퀀스</strong>
+          <p v-if="scheduledSequence" data-test="scheduled-sequence"><code>{{ scheduledSequence }}</code></p>
+          <p v-else class="muted small">이 시나리오를 실행하면 등록된 스크립트 이름과 실행 시각이 표시됩니다.</p>
+        </div>
         <TcLogEvidence v-if="isTcLogScenario" :steps="displaySteps" />
         <PspEvidence v-if="isPspScenario" :steps="displaySteps" />
         <div class="run-progress"><label for="run-progress">{{ completedSteps }} / {{ selectedScenario?.steps.length || 0 }}단계 완료</label>
@@ -75,7 +80,9 @@
           <article v-for="event in state.logs" :key="event.id"><time>{{ formatTime(event.created_at) }}</time><strong>{{ event.type }}</strong><span>{{ logMessage(event) }}</span></article>
         </div>
       </section>
-      <TelemetryPanel :target="state.target" :scope="scope" :telemetry-items="telemetryItems" />
+      <SchedulePanel v-if="isScheduleScenario" :target="state.target" :scope="scope" :refresh-key="state.status" />
+      <TelemetryPanel v-else :target="state.target" :scope="scope" :telemetry-items="telemetryItems"
+        :allowed-screens="allowedTelemetryScreens" />
     </div>
     <v-dialog :model-value="Boolean(state.prompt) && state.run?.execution_mode !== 'manual'" persistent max-width="560" aria-label="시나리오 입력 필요">
       <v-card v-if="state.prompt && state.run?.execution_mode !== 'manual'" class="pa-5">
@@ -97,6 +104,7 @@ import { OpenC3Api } from '@openc3/js-common/services'
 import { TopBar } from '@openc3/vue-common/components'
 import TelemetryPanel from './TelemetryPanel.vue'
 import TcLogEvidence from './TcLogEvidence.vue'
+import SchedulePanel from './SchedulePanel.vue'
 import PspEvidence from './PspEvidence.vue'
 import { formatPlannedParameters, stepCommandPlan } from './stepCommandPlan.js'
 import { createScenarioApi } from './scenarioApi.js'
@@ -105,7 +113,9 @@ import { formatTime, errorMessage, STORAGE_PREFIX } from './runtime.js'
 import './style.css'
 
 const scope = window.openc3Scope || 'DEFAULT'
-const targetOrder = ['CFS-1_QEMU', 'CFS-1_BBB']
+const targetOrder = ['CFS-1_QEMU', 'CFS-1_BBB', 'INST']
+const crcTelemetryScreens = ['CS_HK_TLM_SCREEN', 'XKEY_HK_SCREEN']
+const tcLogTelemetryScreens = ['CI_LOG_STATUS_SCREEN', 'CI_LOG_CHUNK_SCREEN', 'TC_CAMERA_RESULT_SCREEN']
 const scenarioCopy = {
   'tc-log-photo-traversal': {
     name: '02. TC 로그 사진 경로 변경',
@@ -113,7 +123,11 @@ const scenarioCopy = {
   },
   'psp-mm-indirect-write': {
     name: '03. MM 포인터 변경',
-    description: 'PAYLOAD_DATA_APP은 탑재체 샘플을 메모리 버퍼에 주기적으로 기록합니다. MM은 이 앱의 .so 쓰기 가능 영역만 직접 수정할 수 있습니다. 앱 내부의 4바이트 쓰기 포인터를 보호 페이지 주소로 바꾸고 샘플 기록을 재개한 뒤, 지상 관측기로 cFS 프로세스의 SIGSEGV 종료를 확인합니다.',
+    description: 'PAYLOAD_DATA_APP은 탑재체 샘플을 메모리 버퍼에 주기적으로 기록합니다. MM은 이 앱의 .so 쓰기 가능 영역만 직접 수정할 수 있습니다. 앱 내부의 4바이트 쓰기 포인터를 쓰기 금지 코드 영역 (r-x) 주소로 바꾸고 샘플 기록을 재개한 뒤, 지상 관측기로 cFS 프로세스의 SIGSEGV 종료를 확인합니다.',
+  },
+  'ground-station-tc-schedule': {
+    name: '04. 지상국 운영 TC 시퀀스 예약',
+    description: '운영자가 정기적으로 수행하는 INST TC 시퀀스(자세제어 NADIR 전환, 탑재체 수집, HK 수신 확인)를 위성명_날짜_시간 이름의 스크립트로 저장하고, 캘린더(GROUND_OPS)에 5분 뒤 실행으로 등록합니다. 오른쪽에서 예약된 스케줄과 수신되는 TM 메시지를 확인할 수 있습니다.',
   },
   'cs-crc-key-oracle': {
     name: '01. CS 1바이트 CRC 키 복원',
@@ -156,6 +170,11 @@ const verifiedFrame = computed(() => {
 })
 const isTcLogScenario = computed(() => selectedScenario.value?.id === 'tc-log-photo-traversal')
 const isPspScenario = computed(() => selectedScenario.value?.id === 'psp-mm-indirect-write')
+const isScheduleScenario = computed(() => selectedScenario.value?.id === 'ground-station-tc-schedule')
+const allowedTelemetryScreens = computed(() => isCrcScenario.value ? crcTelemetryScreens :
+  isTcLogScenario.value ? tcLogTelemetryScreens : null)
+const scheduledSequence = computed(() => matchesRun.value && state.status === 'succeeded'
+  ? /^Scheduled (.+)$/.exec(state.run?.result?.message || '')?.[1] || '' : '')
 const elapsed = computed(() => {
   if (!state.run) return 0
   const end = ['succeeded', 'failed', 'stopped'].includes(state.status) ? Date.parse(state.run.updated_at) : now.value
@@ -229,14 +248,20 @@ function stepDescription(step) {
   })[step.phase] || step.phase
   if (step.type === 'pspPhase') return ({
     baseline: 'PAYLOAD_DATA_APP의 정상 샘플 기록과 cFS 프로세스 상태 확인',
-    map: 'MM으로 PAYLOAD_DATA_APP 모듈 범위와 쓰기 포인터 슬롯 찾기',
+    map: 'MM으로 PAYLOAD_DATA_APP 모듈 범위, 쓰기 포인터 슬롯과 코드 영역 찾기',
     'deny-direct-write': 'MM이 모듈 밖 정상 버퍼에 직접 쓰기를 거부하는지 확인',
     pause: 'PAYLOAD_DATA_APP의 주기적 샘플 기록 중지',
     'read-pointer': '앱 내부의 4바이트 쓰기 포인터 읽기',
-    'write-pointer': 'MM/PSP로 포인터 4바이트를 보호 페이지 주소로 변경',
-    'verify-pointer': '포인터를 다시 읽어 보호 페이지 주소와 비교',
+    'write-pointer': 'MM/PSP로 포인터 4바이트를 쓰기 금지 코드 영역 주소로 변경',
+    'verify-pointer': '포인터를 다시 읽어 코드 영역 주소와 비교',
     resume: '샘플 기록을 재개해 변경된 포인터 적용',
     'confirm-sigsegv': '지상 관측기로 동일 cFS 프로세스의 SIGSEGV 종료 확인',
+  })[step.phase] || step.phase
+  if (step.type === 'schedulePhase') return ({
+    'check-link': 'INST HEALTH_STATUS가 1초마다 갱신되는지(링크 연결) 확인',
+    'create-sequence': '운영 TC 시퀀스 스크립트 생성 (ATT_CTRL NADIR → COLLECT → HK 수신 확인) · 이름: 위성명_날짜_시간',
+    'schedule-sequence': '캘린더 GROUND_OPS 타임라인에 5분 뒤 실행으로 등록',
+    'verify-schedule': '캘린더에서 예약 내용을 다시 읽어 스크립트·시각 확인',
   })[step.phase] || step.phase
   return step.type
 }

@@ -11,8 +11,7 @@
       FORMAT_STRING "0x%08X"
    APPEND_ITEM BUFFER_ADDRESS 32 UINT "Original writable payload sample buffer address"
       FORMAT_STRING "0x%08X"
-   APPEND_ITEM GUARD_ADDRESS 32 UINT "Write-protected page address used by the scenario"
-      FORMAT_STRING "0x%08X"
+   APPEND_ITEM RESERVED_WORD 32 UINT "Reserved; zero"
    APPEND_ITEM LAST_ACTION 32 UINT "Last payload data application action"
       STATE START 0
       STATE SAMPLE 1

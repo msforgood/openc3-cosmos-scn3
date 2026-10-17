@@ -51,7 +51,7 @@ class AllScenariosContractTest < Minitest::Test
     assert_equal '0x18E4', get_cfs_pkt_msg_id('PAYLOAD_DATA_RESUME_CMD', 1)
     assert_equal '0x08E4', get_cfs_pkt_msg_id('PAYLOAD_DATA_STATE', 1)
     assert_includes command, "'PAYLOAD_DATA_RESUME_CMD', 3"
-    assert_equal %w[STATE LAST_SAMPLE RESERVED SAMPLE_COUNT POINTER_SLOT WRITE_TARGET_ADDRESS BUFFER_ADDRESS GUARD_ADDRESS LAST_ACTION LAST_ERROR],
+    assert_equal %w[STATE LAST_SAMPLE RESERVED SAMPLE_COUNT POINTER_SLOT WRITE_TARGET_ADDRESS BUFFER_ADDRESS RESERVED_WORD LAST_ACTION LAST_ERROR],
                  telemetry.scan(/^\s*APPEND_ITEM\s+(\S+)/).flatten
     refute File.exist?(File.join(ROOT, 'targets/CFS/cmd_tlm/payload_ctrl_tlm_def.txt'))
     refute_includes $CFS_CMD_TLM_LIST.keys, 'PAYLOAD_CTRL_STATE'

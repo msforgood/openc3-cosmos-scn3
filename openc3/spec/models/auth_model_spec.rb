@@ -40,6 +40,21 @@ module OpenC3
       it "self.verify" do
         expect(AuthModel.verify('tokenly')).to eq(false)
       end
+
+      it "self.verify never matches an empty service password" do
+        orig = ENV['OPENC3_SERVICE_PASSWORD']
+        ENV['OPENC3_SERVICE_PASSWORD'] = ''
+        begin
+          expect(AuthModel.verify('')).to eq(false)
+        ensure
+          ENV['OPENC3_SERVICE_PASSWORD'] = orig
+        end
+      end
+
+      it "self.verify accepts generated sessions" do
+        token = AuthModel.generate_session
+        expect(AuthModel.verify(token)).to eq(true)
+      end
     end
   end
 end

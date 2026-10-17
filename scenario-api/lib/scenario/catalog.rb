@@ -42,7 +42,9 @@ module Scenario
       check(d['version'].is_a?(String) && d['version'].length <= 32 && /\A[0-9]+\.[0-9]+\.[0-9]+\z/.match?(d['version']))
       { 'name' => 120, 'description' => 1000 }.each { |key, max| check(d[key].is_a?(String) && d[key].length.between?(1, max)) }
       targets = d['supportedTargets']
-      allowed_targets = @policy.fetch('allowedTargets')
+      schedule = schedule?(d)
+      # The ground-station schedule runs on the demo INST target, never on cFS.
+      allowed_targets = schedule ? @policy.fetch('groundStationSchedule').fetch('targets') : @policy.fetch('allowedTargets')
       check(targets.is_a?(Array) && targets.size.between?(1, allowed_targets.size) &&
             targets.uniq == targets && (targets - allowed_targets).empty?)
       if targets.include?('CFS-1_BBB')
@@ -53,6 +55,7 @@ module Scenario
       number!(d['timeoutSec'], 1, 120)
       is_psp = d['steps'].is_a?(Array) && d['steps'].any? { |step| step.is_a?(Hash) && step['type'] == 'pspPhase' }
       check(d['successCriteria'] == { 'type' => 'allStepsSucceeded', 'requireFreshTelemetry' => !is_psp })
+      return validate_schedule!(d) if schedule
       check(d['telemetryItems'].is_a?(Array) && d['telemetryItems'].size.between?(1, 20))
       refs = d['telemetryItems'].map { |t| reference!(t) }
       check(refs.uniq.size == refs.size)
@@ -139,13 +142,36 @@ module Scenario
       end
     end
 
+    def schedule?(definition)
+      definition['id'] == @policy.fetch('groundStationSchedule').fetch('scenarioId') ||
+        (definition['steps'].is_a?(Array) && definition['steps'].any? { |step| step.is_a?(Hash) && step['type'] == 'schedulePhase' })
+    end
+
+    def validate_schedule!(definition)
+      policy = @policy.fetch('groundStationSchedule')
+      check(definition['id'] == policy.fetch('scenarioId') &&
+            definition['supportedTargets'] == policy.fetch('targets') && definition['timeoutSec'] == 60)
+      link = policy.fetch('linkPacket')
+      message = policy.fetch('messagePacket')
+      check(definition['telemetryItems'] == [{ 'packet' => link, 'item' => policy.fetch('acceptCountItem') },
+                                             { 'packet' => link, 'item' => policy.fetch('attitudeItem') },
+                                             { 'packet' => message, 'item' => policy.fetch('sequenceItem') },
+                                             { 'packet' => message, 'item' => policy.fetch('textItem') }])
+      phases = policy.fetch('phases')
+      check(definition['steps'].is_a?(Array) && definition['steps'].size == phases.size)
+      definition['steps'].zip(phases).each do |step, phase|
+        keys!(step, %w[id type phase])
+        check(step == {'id' => phase, 'type' => 'schedulePhase', 'phase' => phase})
+      end
+    end
+
     def validate_psp!(definition, refs)
       policy = @policy.fetch('pspIndirectWrite')
       check(definition['id'] == policy.fetch('scenarioId') &&
             definition['supportedTargets'] == @policy.fetch('allowedTargets') && definition['timeoutSec'] == 120)
-      check(refs.sort == [['MM_DEBUG', 'STATUS'], ['MM_DEBUG', 'POINTER_SLOT'],
+      check(refs.sort == [['MM_DEBUG', 'STATUS'], ['MM_DEBUG', 'POINTER_SLOT'], ['MM_DEBUG', 'ADDRESS'],
                           ['PAYLOAD_DATA_STATE', 'STATE'], ['PAYLOAD_DATA_STATE', 'WRITE_TARGET_ADDRESS'],
-                          ['PAYLOAD_DATA_STATE', 'GUARD_ADDRESS'], ['PAYLOAD_DATA_STATE', 'SAMPLE_COUNT']].sort)
+                          ['PAYLOAD_DATA_STATE', 'SAMPLE_COUNT']].sort)
       phases = policy.fetch('phases')
       check(definition['steps'].size == phases.size)
       definition['steps'].zip(phases).each do |step, phase|

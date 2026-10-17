@@ -5,8 +5,8 @@ require 'timeout'
 require_relative 'bounded-process'
 
 module CfsBootstrap
-  GEM_PATH = '/openc3/plugins/gems/openc3-cosmos-cfs-7.0.5.pre.all.2.gem'.freeze
-  GEM_SHA256 = '2d62e0c8bb993ded8863cc38ceb8161c83882855519ac90ffb9c860b80822a1b'.freeze
+  GEM_PATH = '/openc3/plugins/gems/openc3-cosmos-cfs-7.0.5.pre.all.3.gem'.freeze
+  GEM_SHA256 = '5971a987ca91e18303f84ed23761b81b0d4e837704e3034df216aae5355b8ccb'.freeze
   TARGETS = %w[CFS-1_QEMU CFS-1_BBB CFS-1_QEMU_XBAND CFS-1_BBB_XBAND CFS_FLEET].freeze
   INTERFACES = %w[CFS-1_QEMU_INTF CFS-1_BBB_INTF CFS-1_QEMU_XBAND_INTF CFS-1_BBB_XBAND_INTF].freeze
   REQUIRED_FILES = %w[
@@ -23,7 +23,7 @@ module CfsBootstrap
 
     package = Gem::Package.new(GEM_PATH)
     package.verify
-    unless package.spec.name == 'openc3-cosmos-cfs' && package.spec.version.to_s == '7.0.5.pre.all.2' &&
+    unless package.spec.name == 'openc3-cosmos-cfs' && package.spec.version.to_s == '7.0.5.pre.all.3' &&
            (REQUIRED_FILES - package.contents).empty?
       raise ScenarioBootstrap::Failure, 'Bundled cFS gem has unexpected identity or missing definitions'
     end

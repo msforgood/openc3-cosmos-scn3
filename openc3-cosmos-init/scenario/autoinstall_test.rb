@@ -22,7 +22,7 @@ class ScenarioInstallerPlanTest < Minitest::Test
 
   def installer(upgrade_from = nil)
     ScenarioBootstrap::Installer.new(
-      artifacts: Artifacts.new('1.0.22'), backend: @backend, guard: nil,
+      artifacts: Artifacts.new('1.0.29'), backend: @backend, guard: nil,
       state_directory: '/unused', upgrade_from: upgrade_from
     )
   end
@@ -33,12 +33,12 @@ class ScenarioInstallerPlanTest < Minitest::Test
 
   def test_fresh_install_and_current_release
     assert_equal :install, installer.plan([])
-    assert_equal :skip, installer.plan(installed('1.0.22'))
+    assert_equal :skip, installer.plan(installed('1.0.29'))
     assert_raises(ScenarioBootstrap::Failure) { installer('1.0.13').plan([]) }
   end
 
   def test_all_supported_prior_releases_upgrade_without_a_version_hint
-    %w[1.0.8 1.0.9 1.0.10 1.0.11 1.0.12 1.0.13 1.0.14 1.0.15 1.0.16 1.0.17 1.0.18 1.0.19 1.0.20 1.0.21].each do |version|
+    %w[1.0.8 1.0.9 1.0.10 1.0.11 1.0.12 1.0.13 1.0.14 1.0.15 1.0.16 1.0.17 1.0.18 1.0.19 1.0.20 1.0.21 1.0.22 1.0.23 1.0.24 1.0.25 1.0.26 1.0.27 1.0.28].each do |version|
       assert_equal :upgrade, installer.plan(installed(version, '__2')), version
       assert_equal :upgrade, installer(version).plan(installed(version)), version
     end
@@ -53,7 +53,7 @@ class ScenarioInstallerPlanTest < Minitest::Test
   end
 
   def test_unsupported_releases_and_downgrade_are_refused
-    %w[1.0.7 1.0.23 2.0.0].each do |version|
+    %w[1.0.7 1.0.30 2.0.0].each do |version|
       assert_raises(ScenarioBootstrap::Failure) { installer.plan(installed(version)) }
     end
   end
@@ -71,7 +71,7 @@ class ScenarioInstallerPlanTest < Minitest::Test
   def test_incomplete_old_or_current_plugin_is_refused
     @backend.incomplete = [[ScenarioBootstrap::NAMES.first, '1.0.13']]
     assert_raises(ScenarioBootstrap::Failure) { installer.plan(installed('1.0.13')) }
-    @backend.incomplete = [[ScenarioBootstrap::NAMES.first, '1.0.22']]
-    assert_raises(ScenarioBootstrap::Failure) { installer.plan(installed('1.0.22')) }
+    @backend.incomplete = [[ScenarioBootstrap::NAMES.first, '1.0.29']]
+    assert_raises(ScenarioBootstrap::Failure) { installer.plan(installed('1.0.29')) }
   end
 end

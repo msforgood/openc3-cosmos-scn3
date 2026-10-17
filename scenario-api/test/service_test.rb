@@ -147,6 +147,21 @@ class ServiceTest < ScenarioTest
     assert_error('invalid_command_event') { callback(run, 'command', data.merge('parameters_json' => '{')) }
   end
 
+  def test_camera_log_after_text_is_persisted_for_evidence
+    definition = @catalog.get('tc-log-photo-traversal')
+    request = input.merge('scenario_id' => definition['id'],
+                          'definition_version' => definition['version'],
+                          'definition_hash' => Scenario::Canonical.hash(definition))
+    run = @service.create(request, token: TOKEN).first
+    data = { 'step_id' => 'read-after', 'status' => 'succeeded',
+             'after_text' => "\uFFFDPNG\r\n\x1A\n" }
+
+    callback(run, 'step', data)
+
+    event = @service.events(run['id'], scope: 'DEFAULT', token: TOKEN)['items'].last
+    assert_equal data, event['data']
+  end
+
   def test_shared_crc_oracle_authorizes_one_shot_on_each_selected_target
     definition = @catalog.get('cs-crc-key-oracle')
     request = { 'scope' => 'DEFAULT', 'target' => 'CFS-1_BBB', 'scenario_id' => definition['id'],

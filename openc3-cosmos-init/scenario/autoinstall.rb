@@ -8,9 +8,9 @@ require 'net/http'
 require_relative 'bounded-process'
 
 module ScenarioBootstrap
-  RELEASE = '1.0.22'.freeze
+  RELEASE = '1.0.29'.freeze
   CORE_VERSION = '6.10.1'.freeze
-  SUPPORTED_UPGRADE_FROM = (8..21).map { |patch| "1.0.#{patch}" }.freeze
+  SUPPORTED_UPGRADE_FROM = (8..28).map { |patch| "1.0.#{patch}" }.freeze
   NAMES = %w[openc3-cosmos-cfs-scenario-runner openc3-cosmos-tool-scenariorunner].freeze
   REQUIRED = {
     NAMES[0] => 'targets/SCENARIO_RUNNER/procedures/run_scenario.py',

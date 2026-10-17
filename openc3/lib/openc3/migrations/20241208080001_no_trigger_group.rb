@@ -31,7 +31,7 @@ module OpenC3
           microservice_model.update
         end
 
-        if microservice_name =~ /__TIMELINE__/
+        if microservice_name =~ /__TIMELINE__/ and !BASE
           # Need to update working dir for Enterprise
           microservice_model.work_dir = '/openc3-enterprise/lib/openc3-enterprise/microservices'
           microservice_model.update

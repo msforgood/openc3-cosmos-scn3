@@ -51,6 +51,10 @@ TELEMETRY <%= target_name %> HEALTH_STATUS BIG_ENDIAN "Health and status from th
     STATE UNAVAILABLE 0 YELLOW
   APPEND_ITEM BLOCKTEST 80 BLOCK "Block data"
   APPEND_ITEM BRACKET[0] 8 UINT "Regular item with brackets in the name"
+  APPEND_ITEM ATT_MODE 8 UINT "Attitude control mode set by ATT_CTRL"
+    STATE SUN_POINTING 0
+    STATE NADIR 1
+    STATE TARGET 2
   ITEM PACKET_TIME 0 0 DERIVED "Ruby time based on TIMESEC and TIMEUS"
     READ_CONVERSION unix_time_conversion.rb TIMESEC TIMEUS
   ITEM TEMP1HIGH 0 0 DERIVED "High-water mark for TEMP1"
@@ -296,3 +300,8 @@ TELEMETRY <%= target_name %> HYBRIDTLM BIG_ENDIAN "Hybrid Accessor Telemetry"
   APPEND_ITEM CBOR_LENGTH 32 UINT
   APPEND_STRUCTURE CBOR 0 CMD <%= target_name %> CBORSTRUCT
     VARIABLE_BIT_SIZE CBOR_LENGTH
+
+TELEMETRY <%= target_name %> MESSAGE BIG_ENDIAN "Stored message downlinked in response to DOWNLINK_MSG"
+  <%= render "_ccsds_tlm.txt", locals: {apid: 15} %>
+  APPEND_ITEM SEQ    8 UINT   "Downlink sequence number (1-5)"
+  APPEND_ITEM TEXT 512 STRING "Downlinked message"

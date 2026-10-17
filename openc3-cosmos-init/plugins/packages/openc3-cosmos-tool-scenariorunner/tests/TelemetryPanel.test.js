@@ -123,6 +123,60 @@ it('chooses the scenario HK and never mounts an installed command-bearing screen
   expect(mocks.apiGet.mock.calls.every(([path]) => !path.includes('cmd'))).toBe(true)
 })
 
+it('lists only the two CRC screens and updates the selection when the scenario changes', async () => {
+  mocks.apiGet.mockImplementation(async (path) => {
+    if (path.endsWith('/screens')) return { data: [
+      'A/screens/es_hk_tlm_screen.txt', 'A/screens/xkey_hk_screen.txt',
+      'A/screens/cs_hk_tlm_screen.txt', 'A/screens/ci_log_status_screen.txt',
+      'B/screens/cs_hk_tlm_screen.txt',
+    ] }
+    if (path.includes('/keywords/')) return { data: [] }
+    return { data: 'SCREEN AUTO AUTO 1.0\nVALUE A XKEY_HK VALUE' }
+  })
+  const crcScreens = ['CS_HK_TLM_SCREEN', 'XKEY_HK_SCREEN']
+  wrapper = mount(TelemetryPanel, { props: { target: 'A', scope: 'DEFAULT',
+    telemetryItems: [{ packet: 'XKEY_HK', item: 'VALUE' }], allowedScreens: crcScreens } })
+  await flushPromises()
+  const options = () => wrapper.findAll('[data-test="screen-select"] option').map((option) => option.text())
+  expect(options()).toEqual(crcScreens)
+  expect(wrapper.get('[data-test="screen-select"]').element.value).toBe('XKEY_HK_SCREEN')
+
+  await wrapper.setProps({ allowedScreens: null,
+    telemetryItems: [{ packet: 'CI_LOG_STATUS', item: 'RESULT' }] }); await flushPromises()
+  expect(options()).toEqual(['CI_LOG_STATUS_SCREEN', 'CS_HK_TLM_SCREEN', 'ES_HK_TLM_SCREEN', 'XKEY_HK_SCREEN'])
+  expect(wrapper.get('[data-test="screen-select"]').element.value).toBe('CI_LOG_STATUS_SCREEN')
+  await wrapper.get('[data-test="screen-select"]').setValue('ES_HK_TLM_SCREEN')
+  await wrapper.setProps({ allowedScreens: crcScreens,
+    telemetryItems: [{ packet: 'XKEY_HK', item: 'VALUE' }] }); await flushPromises()
+  expect(options()).toEqual(crcScreens)
+  expect(wrapper.get('[data-test="screen-select"]').element.value).toBe('XKEY_HK_SCREEN')
+  wrapper.vm.showScreen('A', 'ES_HK_TLM_SCREEN')
+  expect(wrapper.get('[data-test="screen-select"]').element.value).toBe('XKEY_HK_SCREEN')
+  expect(mocks.apiGet.mock.calls.filter(([path]) => path === '/openc3-api/screens')).toHaveLength(1)
+})
+
+it.each(['CFS-1_QEMU', 'CFS-1_BBB'])('lists only scenario 2 log and camera screens for %s', async (target) => {
+  mocks.apiGet.mockImplementation(async (path) => {
+    if (path.endsWith('/screens')) return { data: ['CFS-1_QEMU', 'CFS-1_BBB'].flatMap((name) => [
+      'es_hk_tlm_screen', 'tc_camera_result_screen', 'ci_log_chunk_screen', 'cs_hk_tlm_screen',
+      'ci_log_status_screen',
+    ].map((screenName) => `${name}/screens/${screenName}.txt`)) }
+    if (path.includes('/keywords/')) return { data: [] }
+    return { data: `SCREEN AUTO AUTO 1.0\nVALUE ${target} CI_LOG_STATUS RESULT` }
+  })
+  const tcLogScreens = ['CI_LOG_STATUS_SCREEN', 'CI_LOG_CHUNK_SCREEN', 'TC_CAMERA_RESULT_SCREEN']
+  wrapper = mount(TelemetryPanel, { props: { target, scope: 'DEFAULT',
+    telemetryItems: [{ packet: 'CI_LOG_STATUS', item: 'RESULT' }], allowedScreens: tcLogScreens } })
+  await flushPromises()
+  const options = () => wrapper.findAll('[data-test="screen-select"] option').map((option) => option.text())
+  expect(options()).toEqual(tcLogScreens)
+  expect(wrapper.get('[data-test="screen-select"]').element.value).toBe('CI_LOG_STATUS_SCREEN')
+  wrapper.vm.showScreen(target, 'ES_HK_TLM_SCREEN')
+  expect(wrapper.get('[data-test="screen-select"]').element.value).toBe('CI_LOG_STATUS_SCREEN')
+  await wrapper.setProps({ allowedScreens: null }); await flushPromises()
+  expect(options()).toContain('ES_HK_TLM_SCREEN')
+})
+
 it('keeps the packet screen below a bounded no-limits overview and samples only new receipts', async () => {
   let receipt = Date.now() / 1000
   mocks.values.mockImplementation(async (items) => items.map((item) => [item.includes('RECEIVED_TIMESECONDS') ? receipt : 0, null]))

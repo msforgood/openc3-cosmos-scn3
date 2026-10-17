@@ -77,13 +77,16 @@ class Observer:
 
 class Adapter:
     BUFFER = 0x120000
-    GUARD = 0x121000
+    CODE = 0x200100
     SLOT = 0x300080
 
-    def __init__(self, clock, observer, *, direct_denied=True):
+    def __init__(self, clock, observer, *, direct_denied=True, code_address=CODE,
+                 reserved_word=0, drop_debug_once_for=(), wrong_operation_once_for=()):
         self.clock = clock
         self.observer = observer
         self.direct_denied = direct_denied
+        self.code_address = code_address
+        self.reserved_word = reserved_word
         self.sent = []
         self.samples = {}
         self.pointer = self.BUFFER
@@ -91,6 +94,8 @@ class Adapter:
         self.state = 1
         self.action = 1
         self.resumed_without_tm = False
+        self.drop_debug_once_for = set(drop_debug_once_for)
+        self.wrong_operation_once_for = set(wrong_operation_once_for)
 
     def targets(self):
         return ["CFS-1_QEMU", "CFS-1_BBB"]
@@ -120,7 +125,7 @@ class Adapter:
             "PAYLOAD_DATA_STATE": {"STATE": 8, "LAST_SAMPLE": 8, "RESERVED": 16,
                                    "SAMPLE_COUNT": 32, "POINTER_SLOT": 32,
                                    "WRITE_TARGET_ADDRESS": 32, "BUFFER_ADDRESS": 32,
-                                   "GUARD_ADDRESS": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
+                                   "RESERVED_WORD": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
         }[packet]
         items = [{"name": name, "data_type": "UINT", "bit_size": size}
                  for name, size in fields.items()]
@@ -162,11 +167,20 @@ class Adapter:
                 value = parameters["VALUE"]
             operation = {"MM_CMD_DEBUG_MAP": 13, "MM_CMD_DEBUG_READ": 14,
                          "MM_CMD_DEBUG_WRITE": 15}[packet]
+            debug_key = (packet, parameters.get("ADDRESS"))
+            if debug_key in self.drop_debug_once_for:
+                self.drop_debug_once_for.remove(debug_key)
+                return {"target_name": target, "cmd_name": packet}
+            if debug_key in self.wrong_operation_once_for:
+                self.wrong_operation_once_for.remove(debug_key)
+                operation = 99
             self._publish("MM_DEBUG", {"REQUEST_ID": parameters["REQUEST_ID"],
                                        "OPERATION": operation, "STATUS": status,
                                        "WIDTH_BYTES": parameters.get("WIDTH_BYTES", 4),
                                        "MODULE_START": 0x300000, "MODULE_END": 0x301000,
-                                       "POINTER_SLOT": self.SLOT, "ADDRESS": parameters.get("ADDRESS", 0),
+                                       "POINTER_SLOT": self.SLOT,
+                                       "ADDRESS": self.code_address if packet == "MM_CMD_DEBUG_MAP"
+                                                  else parameters.get("ADDRESS", 0),
                                        "VALUE": value})
         return {"target_name": target, "cmd_name": packet}
 
@@ -174,7 +188,7 @@ class Adapter:
         return {"STATE": self.state, "LAST_SAMPLE": 0x5a, "RESERVED": 0,
                 "SAMPLE_COUNT": self.sample_count, "POINTER_SLOT": self.SLOT,
                 "WRITE_TARGET_ADDRESS": self.pointer, "BUFFER_ADDRESS": self.BUFFER,
-                "GUARD_ADDRESS": self.GUARD, "LAST_ACTION": self.action,
+                "RESERVED_WORD": self.reserved_word, "LAST_ACTION": self.action,
                 "LAST_ERROR": 0}
 
 
@@ -206,17 +220,18 @@ class PspIndirectWriteTests(unittest.TestCase):
                 writes = [args for name, args in adapter.sent if name == "MM_CMD_DEBUG_WRITE"]
                 self.assertEqual([(x["WIDTH_BYTES"], x["ADDRESS"], x["VALUE"])
                                   for x in writes], [(1, Adapter.BUFFER, 0),
-                                                     (4, Adapter.SLOT, Adapter.GUARD)])
-                self.assertEqual(adapter.pointer, Adapter.GUARD)
+                                                     (4, Adapter.SLOT, Adapter.CODE)])
+                self.assertEqual(adapter.pointer, Adapter.CODE)
                 self.assertTrue(adapter.resumed_without_tm)
                 self.assertGreater(observer.reads, 2)
                 accepted = [data for kind, data in management.events if kind == "command" and
                             data["step_id"] == "write-pointer"]
                 self.assertEqual(len(accepted), 1)
                 self.assertEqual(accepted[0]["packet"], "MM_CMD_DEBUG_WRITE")
-                self.assertEqual(json.loads(accepted[0]["parameters_json"])["VALUE"], Adapter.GUARD)
+                self.assertEqual(json.loads(accepted[0]["parameters_json"])["VALUE"], Adapter.CODE)
                 steps = {data["step_id"]: data for kind, data in management.events
                          if kind == "step" and data["status"] == "succeeded"}
+                self.assertEqual(steps["map"]["code_address"], Adapter.CODE)
                 self.assertFalse(steps["resume"]["telemetryConfirmed"])
                 self.assertEqual(steps["confirm-sigsegv"]["exit_signal"], 11)
                 self.assertEqual(steps["confirm-sigsegv"]["process_instance"], Observer.INSTANCE)
@@ -225,8 +240,52 @@ class PspIndirectWriteTests(unittest.TestCase):
         engine, adapter, _observer, _management = self.build(direct_denied=False)
         with self.assertRaisesRegex(runner.ScenarioError, "debug_status_0"):
             engine.run()
+        denied_probe = [args for name, args in adapter.sent
+                        if name == "MM_CMD_DEBUG_WRITE" and args["ADDRESS"] == Adapter.BUFFER]
+        self.assertEqual(len(denied_probe), 1)
         self.assertFalse(any(name == "PAYLOAD_DATA_PAUSE_CMD" for name, _args in adapter.sent))
         self.assertEqual(adapter.pointer, Adapter.BUFFER)
+
+    def test_lost_debug_tm_retries_with_new_request_ids(self):
+        dropped = {("MM_CMD_DEBUG_READ", Adapter.SLOT),
+                   ("MM_CMD_DEBUG_WRITE", Adapter.SLOT)}
+        engine, adapter, _observer, management = self.build(drop_debug_once_for=dropped)
+        self.assertEqual(engine.run(), {"status": "succeeded"})
+        for packet in ("MM_CMD_DEBUG_READ", "MM_CMD_DEBUG_WRITE"):
+            requests = [args["REQUEST_ID"] for name, args in adapter.sent
+                        if name == packet and args.get("ADDRESS") == Adapter.SLOT]
+            expected_count = 3 if packet == "MM_CMD_DEBUG_READ" else 2
+            self.assertEqual(len(requests), expected_count)
+            self.assertEqual(len(set(requests)), expected_count)
+        self.assertEqual(adapter.pointer, Adapter.CODE)
+        accepted = [data for kind, data in management.events if kind == "command" and
+                    data["step_id"] == "write-pointer"]
+        self.assertEqual(len(accepted), 2)
+        self.assertNotEqual(json.loads(accepted[0]["parameters_json"])["REQUEST_ID"],
+                            json.loads(accepted[1]["parameters_json"])["REQUEST_ID"])
+
+    def test_wrong_debug_operation_fails_without_retry(self):
+        engine, adapter, _observer, _management = self.build(
+            wrong_operation_once_for={("MM_CMD_DEBUG_MAP", None)})
+        with self.assertRaisesRegex(runner.ScenarioError, "invalid_debug_operation"):
+            engine.run()
+        self.assertEqual(sum(name == "MM_CMD_DEBUG_MAP" for name, _args in adapter.sent), 1)
+
+    def test_invalid_code_address_blocks_pointer_edit(self):
+        for code_address in (0, Adapter.SLOT, 0xffffff80):
+            with self.subTest(code_address=code_address):
+                engine, adapter, _observer, _management = self.build(code_address=code_address)
+                with self.assertRaisesRegex(runner.ScenarioError,
+                                            "invalid_debug_map|target_inside_debug_range"):
+                    engine.run()
+                self.assertFalse(any(name == "PAYLOAD_DATA_PAUSE_CMD" for name, _ in adapter.sent))
+                self.assertEqual(adapter.pointer, Adapter.BUFFER)
+
+    def test_old_guard_telemetry_fails_before_map(self):
+        engine, adapter, _observer, _management = self.build(reserved_word=0x121000)
+        with self.assertRaisesRegex(runner.ScenarioError, "invalid_payload_layout"):
+            engine.run()
+        self.assertFalse(any(name == "MM_CMD_DEBUG_MAP" for name, _ in adapter.sent))
 
     def test_wrong_signal_fails_closed(self):
         engine, _adapter, _observer, _management = self.build(signal=6)

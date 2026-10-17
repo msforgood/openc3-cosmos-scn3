@@ -8,8 +8,8 @@ existing telemetry screens and read-only Limits changes. Below 1,000px it stacks
 | Identity | Value |
 | --- | --- |
 | Tool / path | `scenariorunner` / `/tools/scenariorunner` |
-| npm package | `@openc3/cosmos-tool-scenariorunner`, version `1.0.22` |
-| Plugin gem | `openc3-cosmos-tool-scenariorunner-1.0.22.gem` |
+| npm package | `@openc3/cosmos-tool-scenariorunner`, version `1.0.29` |
+| Plugin gem | `openc3-cosmos-tool-scenariorunner-1.0.29.gem` |
 | Common libraries | `@openc3/js-common` and `@openc3/vue-common`, exactly `6.10.1` |
 | Development port | `2931` (strict; no fallback port) |
 | API base | `/scenario-api` |
@@ -49,7 +49,7 @@ The common libraries resolve to sibling workspace sources at 6.10.1. The workspa
 The browser fixture intercepts backend traffic and uses installed Chrome (or
 `SCENARIO_BROWSER_CHANNEL=msedge`). It writes ignored local evidence. Production
 assets remain `tools/scenariorunner/main.js` plus chunks. The image packages them
-with release 1.0.22; a source edit requires rebuild and a new release for deployment.
+with release 1.0.29; a source edit requires rebuild and a new release for deployment.
 `pnpm --filter @openc3/cosmos-tool-scenariorunner serve` uses port2931.
 
 ## Backend contract and operation

@@ -46,7 +46,8 @@
       "items": {
         "enum": [
           "CFS-1_QEMU",
-          "CFS-1_BBB"
+          "CFS-1_BBB",
+          "INST"
         ]
       }
     },
@@ -84,6 +85,9 @@
           },
           {
             "$ref": "#/$defs/verifyXbandFrame"
+          },
+          {
+            "$ref": "#/$defs/schedulePhase"
           }
         ]
       }
@@ -143,7 +147,9 @@
         "TC_CAMERA_RESULT",
         "MM_DEBUG",
         "PAYLOAD_DATA_STATE",
-        "XBAND_FRAME"
+        "XBAND_FRAME",
+        "HEALTH_STATUS",
+        "MESSAGE"
       ]
     },
     "item": {
@@ -160,9 +166,9 @@
         "RESULT",
         "STATUS",
         "POINTER_SLOT",
+        "ADDRESS",
         "STATE",
         "WRITE_TARGET_ADDRESS",
-        "GUARD_ADDRESS",
         "SAMPLE_COUNT",
         "MAGIC",
         "IV_PREFIX",
@@ -174,7 +180,11 @@
         "TAG_0",
         "TAG_1",
         "TAG_2",
-        "TAG_3"
+        "TAG_3",
+        "CMD_ACPT_CNT",
+        "SEQ",
+        "TEXT",
+        "ATT_MODE"
       ]
     },
     "command": {
@@ -416,6 +426,31 @@
         },
         "pollIntervalSec": {
           "const": 0.25
+        }
+      }
+    },
+    "schedulePhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "type",
+        "phase"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stepId"
+        },
+        "type": {
+          "const": "schedulePhase"
+        },
+        "phase": {
+          "enum": [
+            "check-link",
+            "create-sequence",
+            "schedule-sequence",
+            "verify-schedule"
+          ]
         }
       }
     }

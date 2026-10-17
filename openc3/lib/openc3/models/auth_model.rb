@@ -46,7 +46,8 @@ module OpenC3
       # Handle a service password - Generally only used by ScriptRunner
       # TODO: Replace this with temporary service tokens
       service_password = ENV['OPENC3_SERVICE_PASSWORD']
-      return true if service_password and service_password == token
+      # An empty service password (e.g. blanked out in the operator) must never match
+      return true if service_password and !service_password.empty? and service_password == token
 
       return verify_no_service(token)
     end
