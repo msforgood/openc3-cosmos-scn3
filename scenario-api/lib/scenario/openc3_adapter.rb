@@ -39,11 +39,14 @@ module Scenario
     end
 
     def validate_definition!(scope, target, definition)
-      raise Error.new('unsupported_target') unless @policy.fetch('allowedTargets').include?(target)
+      schedule = definition['id'] == @policy.fetch('groundStationSchedule').fetch('scenarioId')
+      allowed = schedule ? @policy.fetch('groundStationSchedule').fetch('targets') : @policy.fetch('allowedTargets')
+      raise Error.new('unsupported_target') unless allowed.include?(target)
       Timeout.timeout(8) do
+        validate_schedule(scope, target) if schedule
         validate_tc_log(scope, target) if definition['steps'].any? { |step| step['type'] == 'tcLogPhase' }
         validate_psp(scope, target) if definition['steps'].any? { |step| step['type'] == 'pspPhase' }
-        definition['steps'].each do |step|
+        (schedule ? [] : definition['steps']).each do |step|
           if step['type'] == 'command'
             # Policy is packaged identically with the procedure, not duplicated packet names in code.
             command_policy = @policy.fetch('commands')[step['packet']]
@@ -76,7 +79,7 @@ module Scenario
             validate_item(scope, target, step)
           end
         end
-        definition['telemetryItems'].each { |item| validate_item(scope, target, item) }
+        definition['telemetryItems'].each { |item| validate_item(scope, target, item) } unless schedule
         catalog_text = OpenC3::TargetFile.body(scope, 'SCENARIO_RUNNER/lib/scenarios.json')
         raise Error.new('installed_definition_missing', nil, 409) unless catalog_text && catalog_text.bytesize <= 262_144
         installed = JSON.parse(catalog_text).find { |d| d['id'] == definition['id'] }
@@ -200,6 +203,32 @@ module Scenario
       end
     end
 
+    def validate_schedule(scope, target)
+      policy = @policy.fetch('groundStationSchedule')
+      raise Error.new('unsupported_target') unless policy.fetch('targets').include?(target)
+      # The scheduled sequence may only contain ordinary, non-hazardous commands.
+      policy.fetch('sequenceCommands').each do |name|
+        packet = OpenC3::TargetModel.packet(target, name, type: :CMD, scope: scope)
+        unless packet['target_name'] == target && packet['packet_name'] == name &&
+               %w[hazardous disabled hidden restricted].none? { |flag| packet[flag] }
+          raise Error.new('unsafe_command_definition', nil, 409)
+        end
+      end
+      telemetry_fields = {
+        policy.fetch('linkPacket') => { policy.fetch('acceptCountItem') => ['UINT', 32], policy.fetch('attitudeItem') => ['UINT', 8] },
+        policy.fetch('messagePacket') => { policy.fetch('sequenceItem') => ['UINT', 8], policy.fetch('textItem') => ['STRING', 512] }
+      }
+      telemetry_fields.each do |packet_name, fields|
+        tlm = OpenC3::TargetModel.packet(target, packet_name, type: :TLM, scope: scope)
+        raise Error.new('telemetry_definition_mismatch', nil, 409) unless tlm['target_name'] == target && tlm['packet_name'] == packet_name
+        tlm_items = tlm.fetch('items', []).to_h { |item| [item['name'], item] }
+        unless fields.all? { |item, (kind, size)| tlm_items.dig(item, 'data_type') == kind && tlm_items.dig(item, 'bit_size') == size } &&
+               %w[RECEIVED_TIMESECONDS RECEIVED_COUNT].all? { |item| tlm_items.dig(item, 'data_type') == 'DERIVED' }
+          raise Error.new('telemetry_definition_mismatch', nil, 409)
+        end
+      end
+    end
+
     def validate_psp(scope, target)
       policy = @policy.fetch('pspIndirectWrite')
       raise Error.new('unsupported_target') unless @policy.fetch('allowedTargets').include?(target)
@@ -237,7 +266,7 @@ module Scenario
         'PAYLOAD_DATA_STATE' => {'STATE' => 8, 'LAST_SAMPLE' => 8, 'RESERVED' => 16,
                                  'SAMPLE_COUNT' => 32, 'POINTER_SLOT' => 32,
                                  'WRITE_TARGET_ADDRESS' => 32, 'BUFFER_ADDRESS' => 32,
-                                 'GUARD_ADDRESS' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32}
+                                 'RESERVED_WORD' => 32, 'LAST_ACTION' => 32, 'LAST_ERROR' => 32}
       }
       raise Error.new('invalid_policy') unless telemetry_fields.keys.sort == policy.fetch('telemetryPackets').sort
       telemetry_fields.each do |name, fields|

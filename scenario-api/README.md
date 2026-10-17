@@ -8,7 +8,7 @@ From the repository root (the additional build context supplies the canonical pr
 
 ```sh
 docker compose build scenario-api
-docker run --rm --network none --entrypoint bundle local/openc3-scenario-api:6.10.1-1.0.22 exec rake test
+docker run --rm --network none --entrypoint bundle local/openc3-scenario-api:6.10.1-1.0.29 exec rake test
 ```
 
 The test container is isolated from all OpenC3 deployments and sends no commands. The image bundles pinned OpenC3 6.10.1, Rails 7.2 and Puma 7 (required by this OpenC3 gem), plus SQLite. `Gemfile.lock` fixes transitive dependencies. Build argument `OPENC3_BASE_IMAGE` may select a local mirror of the 6.10.1 Script Runner API image. The image runs as UID/GID 1001 and initializes `/data` with matching ownership.

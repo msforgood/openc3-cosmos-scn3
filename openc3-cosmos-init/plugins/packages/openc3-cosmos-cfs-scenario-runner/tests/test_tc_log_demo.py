@@ -150,6 +150,9 @@ class TcLogDemoTests(unittest.TestCase):
                 self.assertEqual(steps["read-before"]["file_index"], steps["read-after"]["file_index"])
                 self.assertTrue(steps["read-before"]["before_text"].startswith("TCLOG v1"))
                 self.assertTrue(steps["read-after"]["after_hex"].startswith("89504e470d0a1a0a"))
+                self.assertEqual(steps["read-after"]["after_text"],
+                                 bytes.fromhex(steps["read-after"]["after_hex"]).decode("ascii", errors="replace"))
+                self.assertTrue(steps["read-after"]["after_text"].startswith("\ufffdPNG\r\n\x1a\n"))
                 self.assertEqual(steps["overwrite-log"]["filename"], "../log/tc0002.log")
                 self.assertGreater(steps["confirm-continuity"]["active_index"], 2)
                 self.assertEqual(adapter.sent[0][0], "CI_LOG_SEAL_CMD")

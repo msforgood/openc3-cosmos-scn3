@@ -1,15 +1,15 @@
 <template>
   <section class="scenario-preview psp-evidence" aria-label="MM 간접 쓰기 증거" data-test="psp-evidence">
     <h2>포인터 변경과 cFS 종료</h2>
-    <p class="muted small">PAYLOAD_DATA_APP은 정상적으로 버퍼에 샘플을 기록합니다. MM이 앱 내부 포인터를 보호 페이지 주소로 바꾸면, 다음 기록에서 cFS 프로세스가 SIGSEGV로 종료됩니다. 종료 판정은 비행 TM이 아닌 지상 관측 결과입니다.</p>
+    <p class="muted small">PAYLOAD_DATA_APP은 정상적으로 버퍼에 샘플을 기록합니다. MM이 앱 내부 포인터를 쓰기 금지 코드 영역으로 바꾸면, 다음 기록에서 cFS 프로세스가 SIGSEGV로 종료됩니다. 종료 판정은 비행 TM이 아닌 지상 관측 결과입니다.</p>
     <div class="psp-evidence-grid">
       <div><h3>정상 기록과 MM 범위</h3>
         <p>cFS PID: <code>{{ baseline?.pid ?? '—' }}</code></p>
         <p>정상 버퍼: <code>{{ hex(baseline?.buffer_address) }}</code></p>
-        <p>보호 페이지: <code>{{ hex(baseline?.guard_address) }}</code></p>
         <p>완료된 샘플: <strong>{{ baseline?.sample_count ?? '—' }}</strong></p>
         <p>MM 허용 영역: <code>{{ range || 'MM map 대기 중…' }}</code></p>
         <p>포인터 위치: <code>{{ hex(map?.pointer_slot) }}</code></p>
+        <p>쓰기 금지 코드 영역 (r-x): <code>{{ hex(map?.code_address) }}</code></p>
         <p :class="denial ? 'evidence-pass' : 'muted'">{{ denial ? '모듈 밖 정상 버퍼 직접 MM 쓰기 거부됨 (status 3)' : 'MM 범위 검사 대기 중' }}</p>
       </div>
       <div><h3>포인터와 쓰기 대상</h3>

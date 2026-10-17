@@ -496,7 +496,7 @@ export default {
       }
       if (this.activity) {
         Api.put(
-          `/openc3-api/timeline/${this.activity.name}/activity/${this.activity.start}`,
+          `/openc3-api/timeline/${this.activity.name}/activity/${this.activity.start}${this.activity.uuid ? `/${this.activity.uuid}` : ''}`,
           {
             data: { start, stop, kind, data, recurring },
           },

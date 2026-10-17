@@ -214,6 +214,7 @@ export default {
       defaultPlugins: [
         'openc3-cosmos-tool-admin',
         'openc3-cosmos-tool-bucketexplorer',
+        'openc3-cosmos-tool-calendar',
         'openc3-cosmos-tool-cmdsender',
         'openc3-cosmos-tool-cmdqueue', // Enterprise only
         'openc3-cosmos-tool-cmdhistory', // Enterprise only
@@ -231,7 +232,6 @@ export default {
         'openc3-cosmos-tool-tlmviewer',
         'openc3-cosmos-enterprise-tool-admin', // Enterprise only
         'openc3-cosmos-tool-autonomic', // Enterprise only
-        'openc3-cosmos-tool-calendar', // Enterprise only
         'openc3-cosmos-tool-grafana', // Enterprise only
         'openc3-cosmos-tool-systemhealth', // Enterprise only
         'openc3-cosmos-tool-logexplorer', // Enterprise only

@@ -75,8 +75,8 @@
     "RESULT",
     "STATUS",
     "POINTER_SLOT",
+    "ADDRESS",
     "WRITE_TARGET_ADDRESS",
-    "GUARD_ADDRESS",
     "SAMPLE_COUNT",
     "STATE",
     "MAGIC",
@@ -104,9 +104,9 @@
     "TC_CAMERA_RESULT.STATUS": 16,
     "MM_DEBUG.STATUS": 32,
     "MM_DEBUG.POINTER_SLOT": 64,
+    "MM_DEBUG.ADDRESS": 64,
     "PAYLOAD_DATA_STATE.STATE": 8,
     "PAYLOAD_DATA_STATE.WRITE_TARGET_ADDRESS": 32,
-    "PAYLOAD_DATA_STATE.GUARD_ADDRESS": 32,
     "PAYLOAD_DATA_STATE.SAMPLE_COUNT": 32,
     "CS_HK.COMMAND_COUNTER": 8,
     "CS_HK.COMMAND_ERROR_COUNTER": 8,
@@ -199,6 +199,33 @@
       "CFS-1_BBB": "CFS-1_BBB_XBAND"
     },
     "xbandMagic": 1480737841
+  },
+  "groundStationSchedule": {
+    "scenarioId": "ground-station-tc-schedule",
+    "targets": [
+      "INST"
+    ],
+    "phases": [
+      "check-link",
+      "create-sequence",
+      "schedule-sequence",
+      "verify-schedule"
+    ],
+    "linkPacket": "HEALTH_STATUS",
+    "acceptCountItem": "CMD_ACPT_CNT",
+    "attitudeItem": "ATT_MODE",
+    "messagePacket": "MESSAGE",
+    "sequenceItem": "SEQ",
+    "textItem": "TEXT",
+    "sequenceCommands": [
+      "ATT_CTRL",
+      "COLLECT"
+    ],
+    "timeline": "GROUND_OPS",
+    "timelineColor": "#1e88e5",
+    "delaySec": 300,
+    "durationSec": 60,
+    "utcOffsetHours": 9
   },
   "headerDefaults": {
     "CCSDS_SEQUENCE": 49152,

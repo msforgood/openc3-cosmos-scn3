@@ -5,7 +5,7 @@ so the same safety behavior can be tested without any flight connection.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import math
@@ -30,6 +30,8 @@ XBAND_FIELDS = ("MAGIC", "IV_PREFIX", "COUNTER", "CIPHERTEXT_0", "CIPHERTEXT_1",
                 "CIPHERTEXT_2", "CIPHERTEXT_3", "TAG_0", "TAG_1", "TAG_2", "TAG_3")
 TCLOG = POLICY["tcLogTraversal"]
 PSP = POLICY["pspIndirectWrite"]
+SCHEDULE = POLICY["groundStationSchedule"]
+SCHEDULE_TARGETS = frozenset(SCHEDULE["targets"])
 RECEIPT_ITEMS = ("RECEIVED_COUNT", "RECEIVED_TIMESECONDS")
 RESERVED_ITEMS = frozenset({"PACKET_TIMESECONDS", "PACKET_TIMEFORMATTED", "RECEIVED_TIMESECONDS", "RECEIVED_TIMEFORMATTED", "RECEIVED_COUNT"})
 HEADER_DEFAULTS = POLICY["headerDefaults"]
@@ -52,7 +54,7 @@ def require(condition, code="invalid_definition"):
 
 
 def bounded_call(function, seconds, label):
-    """Bound even a stalled authentication/HTTP call; never retry a command.
+    """Bound even a stalled authentication/HTTP call; never retry a timed-out call.
 
     A timed-out in-flight request is ambiguous and cannot be unsent. The engine
     exits immediately and submits no subsequent commands. The daemon is not
@@ -102,6 +104,55 @@ def _reference(value):
     return value["packet"], value["item"]
 
 
+def is_schedule(definition):
+    return type(definition.get("steps")) is list and any(
+        type(step) is dict and step.get("type") == "schedulePhase" for step in definition["steps"])
+
+
+def scenario_targets(definition):
+    return SCHEDULE_TARGETS if definition.get("id") == SCHEDULE["scenarioId"] else ALLOWED_TARGETS
+
+
+def validate_schedule(definition):
+    require(definition["id"] == SCHEDULE["scenarioId"] and
+            definition["supportedTargets"] == SCHEDULE["targets"] and definition["timeoutSec"] == 60)
+    require(definition["successCriteria"] == {"type": "allStepsSucceeded", "requireFreshTelemetry": True})
+    link, message = SCHEDULE["linkPacket"], SCHEDULE["messagePacket"]
+    require(definition["telemetryItems"] == [
+        {"packet": link, "item": SCHEDULE["acceptCountItem"]},
+        {"packet": link, "item": SCHEDULE["attitudeItem"]},
+        {"packet": message, "item": SCHEDULE["sequenceItem"]},
+        {"packet": message, "item": SCHEDULE["textItem"]},
+    ])
+    steps = definition["steps"]
+    require(type(steps) is list and len(steps) == len(SCHEDULE["phases"]))
+    for step, phase in zip(steps, SCHEDULE["phases"]):
+        require(step == {"id": phase, "type": "schedulePhase", "phase": phase})
+    canonical_hash(definition)
+    return definition
+
+
+def sequence_script(target, name, scheduled):
+    """The operator's routine TC sequence; fixed content, only names and times vary."""
+    when = scheduled.strftime("%Y-%m-%d %H:%M:%S %z")
+    return f'''# {name}: 운영자 등록 TC 시퀀스 (Calendar {SCHEDULE["timeline"]} 예약 실행)
+# Satellite: {target} · Scheduled: {when}
+
+# 1) 자세제어 모드 변경: NADIR 지향
+cmd("{target} ATT_CTRL with MODE NADIR")
+wait_check("{target} HEALTH_STATUS ATT_MODE == 'NADIR'", 10)
+
+# 2) 탑재체 정상 수집
+cmd("{target} COLLECT with TYPE NORMAL, DURATION 1.0")
+
+# 3) HK 데이터 수신 확인
+wait_check_packet("{target}", "HEALTH_STATUS", 3, 10)
+print(f"HK received: ATT_MODE={{tlm('{target} HEALTH_STATUS ATT_MODE')}} "
+      f"CMD_ACPT_CNT={{tlm('{target} HEALTH_STATUS CMD_ACPT_CNT')}} "
+      f"COLLECTS={{tlm('{target} HEALTH_STATUS COLLECTS')}}")
+'''
+
+
 def validate_definition(definition):
     """Strict schema plus semantic constraints; every send must have a fresh wait."""
     _keys(definition, "schemaVersion id version name description supportedTargets timeoutSec steps telemetryItems successCriteria")
@@ -111,13 +162,16 @@ def validate_definition(definition):
     for field, maximum in (("name", 120), ("description", 1000)):
         require(type(definition[field]) is str and 1 <= len(definition[field]) <= maximum)
     targets = definition["supportedTargets"]
-    require(type(targets) is list and 1 <= len(targets) <= len(ALLOWED_TARGETS) and
+    allowed = scenario_targets(definition)
+    require(type(targets) is list and 1 <= len(targets) <= len(allowed) and
             all(type(target) is str for target in targets) and
-            len(set(targets)) == len(targets) and set(targets) <= ALLOWED_TARGETS)
+            len(set(targets)) == len(targets) and set(targets) <= allowed)
     if "CFS-1_BBB" in targets:
         require(definition["id"] in (TCLOG["scenarioId"], PSP["scenarioId"], ORACLE["scenarioId"]))
     _number(definition["timeoutSec"], 1, 120)
     _keys(definition["successCriteria"], "type requireFreshTelemetry")
+    if definition["id"] == SCHEDULE["scenarioId"] or is_schedule(definition):
+        return validate_schedule(definition)
     psp_definition = type(definition["steps"]) is list and any(
         type(step) is dict and step.get("type") == "pspPhase" for step in definition["steps"])
     require(definition["successCriteria"]["type"] == "allStepsSucceeded" and
@@ -161,9 +215,9 @@ def validate_definition(definition):
         require(definition["id"] == PSP["scenarioId"] and
                 definition["supportedTargets"] == POLICY["allowedTargets"] and definition["timeoutSec"] == 120)
         require(set(refs) == {("MM_DEBUG", "STATUS"), ("MM_DEBUG", "POINTER_SLOT"),
+                              ("MM_DEBUG", "ADDRESS"),
                               ("PAYLOAD_DATA_STATE", "STATE"),
                               ("PAYLOAD_DATA_STATE", "WRITE_TARGET_ADDRESS"),
-                              ("PAYLOAD_DATA_STATE", "GUARD_ADDRESS"),
                               ("PAYLOAD_DATA_STATE", "SAMPLE_COUNT")})
         require(len(steps) == len(PSP["phases"]))
         for step, phase in zip(steps, PSP["phases"]):
@@ -235,7 +289,7 @@ def pin_definition(context, catalog, expected_hash):
     require(local["version"] == snapshot["version"], "definition_mismatch")
     require(type(expected_hash) is str and re.fullmatch(r"[0-9a-f]{64}", expected_hash), "definition_mismatch")
     require(canonical_hash(snapshot) == canonical_hash(local) == context.get("definition_hash") == expected_hash, "definition_mismatch")
-    require(context.get("target") in ALLOWED_TARGETS.intersection(local["supportedTargets"]), "invalid_target")
+    require(context.get("target") in scenario_targets(local).intersection(local["supportedTargets"]), "invalid_target")
     require(context.get("stop_requested") is False, "stop_requested")
     return local
 
@@ -348,6 +402,27 @@ class OpenC3Adapter:
         require(type(received) in (int, float) and math.isfinite(received) and received >= 0, "invalid_telemetry")
         return PacketSample(dict(zip(fields, (row[0] for row in rows))), count, received,
                             any(row[1] == "STALE" for row in rows))
+
+    def put_target_file(self, path, text):
+        from openc3.script.storage import put_target_file
+        return put_target_file(path, text, scope=self.scope)
+
+    def timelines(self):
+        from openc3.script.cosmos_calendar import list_timelines
+        return [timeline.get("name") for timeline in list_timelines(scope=self.scope)]
+
+    def create_timeline(self, name, color):
+        from openc3.script.cosmos_calendar import create_timeline
+        return create_timeline(name, color=color, scope=self.scope)
+
+    def create_activity(self, timeline, start, stop, data):
+        from openc3.script.cosmos_calendar import create_timeline_activity
+        return create_timeline_activity(timeline, "script", datetime.fromtimestamp(start, timezone.utc),
+                                        datetime.fromtimestamp(stop, timezone.utc), data=data, scope=self.scope)
+
+    def activity(self, timeline, start, uuid):
+        from openc3.script.cosmos_calendar import get_timeline_activity
+        return get_timeline_activity(timeline, start, uuid, scope=self.scope)
 
     def subscribe_packets(self, target, packet):
         return self.api.subscribe_packets([[target, packet]], scope=self.scope)
@@ -536,8 +611,11 @@ class ScenarioRunner:
 
     def _preflight(self, definition):
         names = self._call(self.adapter.targets, "targets")
-        require(type(names) is list and self.target in set(names).intersection(definition["supportedTargets"]).intersection(ALLOWED_TARGETS), "target_not_installed")
+        require(type(names) is list and self.target in set(names).intersection(definition["supportedTargets"]).intersection(scenario_targets(definition)), "target_not_installed")
         self.xband_target = ORACLE["xbandTargets"].get(self.target)
+        if is_schedule(definition):
+            self._preflight_schedule()
+            return
         if any(step["type"] == "verifyXbandFrame" for step in definition["steps"]):
             require(self.xband_target in names, "xband_target_not_installed")
         if any(step["type"] == "tcLogPhase" for step in definition["steps"]):
@@ -569,6 +647,92 @@ class ScenarioRunner:
         if any(step["type"] == "crcByte" for step in definition["steps"]):
             self._preflight_oracle()
             self._preflight_xband()
+
+    def _preflight_schedule(self):
+        for packet in SCHEDULE["sequenceCommands"]:
+            data = self._call(lambda p=packet: self.adapter.command_definition(self.target, p),
+                              "command_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet and
+                    not any(data.get(flag) for flag in ("hazardous", "disabled", "hidden", "restricted")),
+                    "invalid_command")
+        expected = {
+            SCHEDULE["linkPacket"]: {
+                SCHEDULE["acceptCountItem"]: ("UINT", 32), SCHEDULE["attitudeItem"]: ("UINT", 8)},
+            SCHEDULE["messagePacket"]: {
+                SCHEDULE["sequenceItem"]: ("UINT", 8), SCHEDULE["textItem"]: ("STRING", 512)},
+        }
+        for packet, fields in expected.items():
+            data = self._call(lambda p=packet: self.adapter.telemetry_definition(self.target, p),
+                              "telemetry_definition")
+            require(type(data) is dict and data.get("target_name") == self.target and
+                    data.get("packet_name") == packet, "invalid_telemetry_item")
+            items = {v["name"]: v for v in data.get("items", [])}
+            require(all(k in items and items[k].get("data_type") == kind and
+                        items[k].get("bit_size") == size for k, (kind, size) in fields.items()) and
+                    all(items.get(k, {}).get("data_type") == "DERIVED" for k in RECEIPT_ITEMS),
+                    "telemetry_definition_mismatch")
+
+    def _schedule_phase(self, step):
+        phase = step["phase"]
+        link, accept = SCHEDULE["linkPacket"], SCHEDULE["acceptCountItem"]
+        timeline = SCHEDULE["timeline"]
+        if phase == "check-link":
+            first = self._call(lambda: self.adapter.sample(self.target, link, accept), "telemetry")
+            started = self.wall_time()
+            for _ in range(13):
+                self.sleep(min(0.25, self._remaining()))
+                self._check_stop()
+                sample = self._call(lambda: self.adapter.sample(self.target, link, accept), "telemetry")
+                now = self.wall_time()
+                if (not sample.stale and sample.count > first.count and sample.received > first.received and
+                        sample.received >= int(started) - 1 and -1 <= now - sample.received <= 5):
+                    return {"packet": link, "item": accept, "value": sample.value,
+                            "telemetryConfirmed": True,
+                            "message": f"{self.target} {link} is live · {accept} = {sample.value}"}
+            raise ScenarioError("link_not_live")
+        if phase == "create-sequence":
+            zone = timezone(timedelta(hours=SCHEDULE["utcOffsetHours"]))
+            start = math.ceil(self.wall_time()) + SCHEDULE["delaySec"]
+            scheduled = datetime.fromtimestamp(start, zone)
+            name = f"{self.target}_{scheduled.strftime('%Y%m%d_%H%M%S')}"
+            path = f"{self.target}/procedures/{name}.py"
+            self._call(lambda: self.adapter.put_target_file(path, sequence_script(self.target, name, scheduled)),
+                       "save_script", 5)
+            self.schedule = {"name": name, "path": path, "start": start, "scheduled": scheduled}
+            return {"filename": path,
+                    "message": f"Created {path} (ATT_CTRL NADIR, COLLECT NORMAL, HK check)"}
+        if phase == "schedule-sequence":
+            require(hasattr(self, "schedule"), "invalid_phase_order")
+            names = self._call(self.adapter.timelines, "timelines")
+            require(type(names) is list, "invalid_timeline")
+            if timeline not in names:
+                self._call(lambda: self.adapter.create_timeline(timeline, SCHEDULE["timelineColor"]),
+                           "create_timeline", 5)
+            start = self.schedule["start"]
+            require(start - self.wall_time() >= SCHEDULE["delaySec"] - 30, "schedule_too_late")
+            data = {"script": self.schedule["path"], "environment": []}
+            activity = self._call(lambda: self.adapter.create_activity(
+                timeline, start, start + SCHEDULE["durationSec"], data), "create_activity", 5)
+            require(type(activity) is dict and activity.get("start") == start and
+                    type(activity.get("uuid")) is str and activity["uuid"], "activity_not_created")
+            self.schedule["uuid"] = activity["uuid"]
+            when = self.schedule["scheduled"].strftime("%Y-%m-%d %H:%M:%S %z")
+            return {"filename": self.schedule["path"],
+                    "message": f"Registered {self.schedule['name']} on Calendar {timeline} at {when}"}
+        if phase == "verify-schedule":
+            require(hasattr(self, "schedule") and "uuid" in self.schedule, "invalid_phase_order")
+            start, uuid = self.schedule["start"], self.schedule["uuid"]
+            activity = self._call(lambda: self.adapter.activity(timeline, start, uuid), "get_activity", 5)
+            require(type(activity) is dict and activity.get("uuid") == uuid and
+                    activity.get("kind") == "script" and activity.get("start") == start and
+                    activity.get("stop") == start + SCHEDULE["durationSec"] and
+                    type(activity.get("data")) is dict and
+                    activity["data"].get("script") == self.schedule["path"], "schedule_mismatch")
+            when = self.schedule["scheduled"].strftime("%Y-%m-%d %H:%M:%S %z")
+            self.scheduled_message = f"Scheduled {self.schedule['name']} on {timeline} at {when}"
+            return {"filename": self.schedule["path"], "message": self.scheduled_message}
+        raise ScenarioError("invalid_phase")
 
     def _preflight_tc_log(self):
         fields = {
@@ -643,7 +807,7 @@ class ScenarioRunner:
             "PAYLOAD_DATA_STATE": {"STATE": 8, "LAST_SAMPLE": 8, "RESERVED": 16,
                                    "SAMPLE_COUNT": 32, "POINTER_SLOT": 32,
                                    "WRITE_TARGET_ADDRESS": 32, "BUFFER_ADDRESS": 32,
-                                   "GUARD_ADDRESS": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
+                                   "RESERVED_WORD": 32, "LAST_ACTION": 32, "LAST_ERROR": 32},
         }
         require(set(telemetry) == set(PSP["telemetryPackets"]), "invalid_policy")
         for packet, fields in telemetry.items():
@@ -960,7 +1124,8 @@ class ScenarioRunner:
                     size == self.tc_photo_bytes and data != self.tc_before,
                     "log_overwrite_unconfirmed")
             return {"file_index": self.tc_target_index, "file_size": size,
-                    "after_hex": data.hex(), "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
+                    "after_text": data.decode("ascii", errors="replace"), "after_hex": data.hex(),
+                    "received_at": datetime.fromtimestamp(received, timezone.utc).isoformat(),
                     "message": "Same onboard log path now contains PNG bytes", "telemetryConfirmed": True}
         if phase == "confirm-continuity":
             values = self._tc_status().values
@@ -1012,20 +1177,33 @@ class ScenarioRunner:
     def _psp_debug(self, operation, parameters, expected_status=0):
         fields = ("REQUEST_ID", "OPERATION", "STATUS", "WIDTH_BYTES", "MODULE_START",
                   "MODULE_END", "POINTER_SLOT", "ADDRESS", "VALUE")
-        sample = self._psp_exchange(operation, parameters, "MM_DEBUG", fields,
-                                    lambda v: v.get("OPERATION") == {
-                                        "MM_CMD_DEBUG_MAP": 13,
-                                        "MM_CMD_DEBUG_READ": 14,
-                                        "MM_CMD_DEBUG_WRITE": 15,
-                                    }[operation], request=True)
-        status = sample.values["STATUS"]
-        require(type(status) is int and 0 <= status <= 7, "invalid_debug_status")
-        require(status == expected_status, f"debug_status_{status}")
-        return sample
+        expected_operation = {"MM_CMD_DEBUG_MAP": 13,
+                              "MM_CMD_DEBUG_READ": 14,
+                              "MM_CMD_DEBUG_WRITE": 15}[operation]
+
+        def matching_operation(values):
+            require(values.get("OPERATION") == expected_operation, "invalid_debug_operation")
+            return True
+
+        # MM debug commands are idempotent. Retry only when their correlated TM
+        # never arrived; each exchange takes a new baseline and REQUEST_ID.
+        for attempt in range(3):
+            try:
+                sample = self._psp_exchange(operation, parameters, "MM_DEBUG", fields,
+                                            matching_operation, request=True)
+            except ScenarioError as error:
+                if str(error) != "psp_telemetry_timeout" or attempt == 2:
+                    raise
+                self._remaining()
+                continue
+            status = sample.values["STATUS"]
+            require(type(status) is int and 0 <= status <= 7, "invalid_debug_status")
+            require(status == expected_status, f"debug_status_{status}")
+            return sample
 
     def _psp_data(self, command, predicate):
         fields = ("STATE", "LAST_SAMPLE", "RESERVED", "SAMPLE_COUNT", "POINTER_SLOT",
-                  "WRITE_TARGET_ADDRESS", "BUFFER_ADDRESS", "GUARD_ADDRESS",
+                  "WRITE_TARGET_ADDRESS", "BUFFER_ADDRESS", "RESERVED_WORD",
                   "LAST_ACTION", "LAST_ERROR")
         return self._psp_exchange(command, {}, "PAYLOAD_DATA_STATE", fields, predicate)
 
@@ -1068,36 +1246,38 @@ class ScenarioRunner:
                                   type(v.get("SAMPLE_COUNT")) is int and
                                   v["SAMPLE_COUNT"] > 0 and v.get("LAST_ERROR") == 0).values
             buffer_address = data["BUFFER_ADDRESS"]
-            guard_address = data["GUARD_ADDRESS"]
             slot = data["POINTER_SLOT"]
             require(all(type(v) is int and 0x10000 <= v <= 0xffffffff
-                        for v in (buffer_address, guard_address, slot)) and
-                    buffer_address != guard_address and
+                        for v in (buffer_address, slot)) and
+                    data["RESERVED_WORD"] == 0 and
                     data["WRITE_TARGET_ADDRESS"] == buffer_address,
                     "invalid_payload_layout")
             self.psp_buffer = buffer_address
-            self.psp_guard = guard_address
             self.psp_slot_reported = slot
             self.psp_sample_count = data["SAMPLE_COUNT"]
             self.psp_process_instance = process["instance_id"]
             self.psp_pid = process["pid"]
-            return {"buffer_address": buffer_address, "guard_address": guard_address,
+            return {"buffer_address": buffer_address,
                     "pointer_slot": slot, "sample_count": self.psp_sample_count,
                     "process_instance": self.psp_process_instance, "pid": self.psp_pid,
                     "message": "Payload samples are being written to the normal buffer",
                     "commandAccepted": True, "telemetryConfirmed": True}
-        require(hasattr(self, "psp_guard"), "invalid_psp_state")
+        require(hasattr(self, "psp_buffer"), "invalid_psp_state")
         if phase == "map":
             values = self._psp_debug("MM_CMD_DEBUG_MAP", {}).values
             start, end, slot = (values[k] for k in ("MODULE_START", "MODULE_END", "POINTER_SLOT"))
-            require(all(type(v) is int for v in (start, end, slot)) and
+            code_address = values["ADDRESS"]
+            require(all(type(v) is int for v in (start, end, slot, code_address)) and
                     0x10000 <= start <= slot and slot + PSP["pointerBytes"] <= end <= 0x100000000 and
+                    0x10000 <= code_address <= 0xffffffff - 255 and
                     slot == self.psp_slot_reported, "invalid_debug_map")
-            require(not start <= self.psp_guard < end and
+            require(not start <= code_address < end and
                     not start <= self.psp_buffer < end, "target_inside_debug_range")
             self.psp_slot = slot
+            self.psp_code_address = code_address
             return {"module_start": start, "module_end": end, "pointer_slot": slot,
-                    "message": f"MM located PAYLOAD_DATA_APP pointer slot 0x{slot:08x}",
+                    "code_address": code_address,
+                    "message": f"MM located pointer slot 0x{slot:08x} and read-only code 0x{code_address:08x}",
                     "commandAccepted": True, "telemetryConfirmed": True}
         require(hasattr(self, "psp_slot"), "invalid_psp_state")
         if phase == "deny-direct-write":
@@ -1136,21 +1316,21 @@ class ScenarioRunner:
         if phase == "write-pointer":
             values = self._psp_debug("MM_CMD_DEBUG_WRITE", {"WIDTH_BYTES": 4,
                                      "ADDRESS": self.psp_slot,
-                                     "VALUE": self.psp_guard, "RESERVED": 0}).values
+                                     "VALUE": self.psp_code_address, "RESERVED": 0}).values
             require(values["ADDRESS"] == self.psp_slot and values["WIDTH_BYTES"] == 4 and
-                    values["VALUE"] == self.psp_guard, "pointer_write_mismatch")
-            return {"pointer_slot": self.psp_slot, "pointer_after": self.psp_guard,
-                    "message": "MM wrote the four-byte guard address into the permitted pointer slot",
+                    values["VALUE"] == self.psp_code_address, "pointer_write_mismatch")
+            return {"pointer_slot": self.psp_slot, "pointer_after": self.psp_code_address,
+                    "message": "MM wrote the read-only code address into the permitted pointer slot",
                     "commandAccepted": True, "telemetryConfirmed": True}
         if phase == "verify-pointer":
             values = self._psp_debug("MM_CMD_DEBUG_READ", {"WIDTH_BYTES": 4,
                                      "ADDRESS": self.psp_slot}).values
-            require(values["VALUE"] == self.psp_guard and
+            require(values["VALUE"] == self.psp_code_address and
                     values["ADDRESS"] == self.psp_slot and
                     values["WIDTH_BYTES"] == 4, "pointer_change_unconfirmed")
-            return {"pointer_after": self.psp_guard,
+            return {"pointer_after": self.psp_code_address,
                     "pointer_before": self.psp_pointer_before,
-                    "message": f"Payload pointer now targets guard page 0x{self.psp_guard:08x}",
+                    "message": f"Payload pointer now targets read-only code 0x{self.psp_code_address:08x}",
                     "commandAccepted": True, "telemetryConfirmed": True}
         if phase == "resume":
             process = self._psp_observer_status()
@@ -1164,7 +1344,7 @@ class ScenarioRunner:
             self._check_stop()
             self.last_send = self.monotonic()
             self._send_command("PAYLOAD_DATA_RESUME_CMD", {}, self._remaining(2))
-            return {"write_target": self.psp_guard,
+            return {"write_target": self.psp_code_address,
                     "message": "Payload sampling resumed; waiting for external process evidence",
                     "commandAccepted": True, "telemetryConfirmed": False}
         if phase == "confirm-sigsegv":
@@ -1238,6 +1418,8 @@ class ScenarioRunner:
                     data = self._tc_log_phase(step)
                 elif step["type"] == "pspPhase":
                     data = self._psp_phase(step)
+                elif step["type"] == "schedulePhase":
+                    data = self._schedule_phase(step)
                 else:
                     data = self._wait_telemetry(step)
                 self._emit("step", dict(data, step_id=step["id"], status="succeeded"))
@@ -1247,8 +1429,10 @@ class ScenarioRunner:
                 message = f"Recovered X-band lab key: {bytes(self.recovered).hex()}"
             elif hasattr(self, "tc_target_index"):
                 message = f"Onboard TC log tc{self.tc_target_index:04d}.log replaced by the demo photo"
+            elif hasattr(self, "scheduled_message"):
+                message = self.scheduled_message
             elif hasattr(self, "psp_pointer_before"):
-                message = "MM pointer edit redirected PAYLOAD_DATA_APP to a guard page; host confirmed cFS SIGSEGV"
+                message = "MM pointer edit redirected PAYLOAD_DATA_APP to read-only code; host confirmed cFS SIGSEGV"
             else:
                 message = "All steps completed with fresh telemetry"
             self._emit("result", {"status": "succeeded", "message": message})

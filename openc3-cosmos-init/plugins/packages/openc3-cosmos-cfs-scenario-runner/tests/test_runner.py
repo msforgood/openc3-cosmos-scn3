@@ -422,14 +422,15 @@ class ValidationTests(unittest.TestCase):
         d = HOUSEKEEPING["qemu-es-housekeeping"]
         self.assertEqual(runner.canonical_hash(d), runner.canonical_hash(dict(reversed(list(d.items())))))
 
-    def test_published_catalog_has_three_ordered_scenarios_shared_by_targets(self):
+    def test_published_catalog_has_four_ordered_scenarios(self):
         catalog = runner.load_catalog()
         self.assertEqual(list(catalog), [
-            "cs-crc-key-oracle", "tc-log-photo-traversal", "psp-mm-indirect-write",
+            "cs-crc-key-oracle", "tc-log-photo-traversal", "psp-mm-indirect-write", "ground-station-tc-schedule",
         ])
+        self.assertEqual(catalog["ground-station-tc-schedule"]["supportedTargets"], ["INST"])
         for target in ("CFS-1_QEMU", "CFS-1_BBB"):
             definitions = [d for d in catalog.values() if target in d["supportedTargets"]]
-            self.assertEqual(list(catalog), [definition["id"] for definition in definitions])
+            self.assertEqual(list(catalog)[:3], [definition["id"] for definition in definitions])
             self.assertEqual([definition["name"] for definition in definitions], [
                 "01. CS 1바이트 CRC 키 복원", "02. TC 로그 사진 경로 변경", "03. MM 포인터 변경",
             ])

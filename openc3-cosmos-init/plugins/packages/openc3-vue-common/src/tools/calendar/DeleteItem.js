@@ -25,8 +25,11 @@ export default {
       let api = ''
       switch (item.type.toLowerCase()) {
         case 'activity':
-          api = 'activity'
+          api = `timeline/${item.activity.name}/activity`
           start = item.activity.start
+          if (item.activity.uuid) {
+            start = `${start}/${item.activity.uuid}`
+          }
           break
         case 'metadata':
           api = 'metadata'

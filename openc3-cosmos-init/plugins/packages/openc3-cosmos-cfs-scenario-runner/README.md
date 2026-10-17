@@ -1,8 +1,8 @@
 # CFS Scenario Runner procedure plugin
 
-Independent `openc3-cosmos-cfs-scenario-runner` **1.0.22**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image builds and installs it together with the Scenario UI.
+Independent `openc3-cosmos-cfs-scenario-runner` **1.0.29**, designed for **OpenC3 6.10.1**. It creates only the `SCENARIO_RUNNER` procedure target and uses existing CFS command/telemetry APIs. It adds no interface, mapping, sender, or CFS communication configuration. It remains separate from the CFS communications gem, but the standard cosmos-init image builds and installs it together with the Scenario UI.
 
-This integration release includes three shared numbered cFS demonstrations, selectable for either QEMU or BBB; the example housekeeping checks are removed. The PSP procedure redirects the four-byte `.data` pointer in `PAYLOAD_DATA_APP` to a `PROT_NONE` page. After the app resumes, a private process observer must confirm signal 11 for the same cFS process instance recorded at baseline. Telemetry silence or an ordinary exit code does not prove the result.
+This integration release includes three shared numbered cFS demonstrations, selectable for either QEMU or BBB; the example housekeeping checks are removed. The PSP procedure redirects the four-byte `.data` pointer in `PAYLOAD_DATA_APP` to the module's existing read-only code region reported by MM. After the app resumes, a private process observer must confirm signal 11 for the same cFS process instance recorded at baseline. Telemetry silence or an ordinary exit code does not prove the result.
 
 The shipped scenarios are fixed:
 

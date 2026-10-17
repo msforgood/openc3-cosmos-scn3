@@ -55,7 +55,7 @@ it('maps every PSP phase, including observation-only steps and dynamic addresses
   })
   expect(parameters({ type: 'pspPhase', phase: 'write-pointer' })[0]).toEqual({
     WIDTH_BYTES: 4, ADDRESS: expect.stringContaining('POINTER_SLOT'),
-    VALUE: expect.stringContaining('GUARD_ADDRESS'), RESERVED: 0,
+    VALUE: 'MM_DEBUG_MAP.ADDRESS (map 단계 쓰기 금지 코드 영역)', RESERVED: 0,
     REQUEST_ID: expect.stringContaining('32-bit'),
   })
 })

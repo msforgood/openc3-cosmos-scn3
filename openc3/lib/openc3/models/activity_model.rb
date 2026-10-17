@@ -47,7 +47,7 @@ module OpenC3
       start_score = now - 15
       stop_score = (now + 3660)
       array = Store.zrangebyscore("#{scope}#{PRIMARY_KEY}__#{name}", start_score, stop_score)
-      return array.map { |value| ActivityModel.from_json(value, name: name, scope: scope) }
+      return array.map { |value| ActivityModel.from_json(value, name: name, scope: scope, validate: false) }
     end
 
     # @return [Array|nil] Array up to 100 of this model or empty array if name not found under primary_key
@@ -71,11 +71,11 @@ module OpenC3
       if values and values.length > 0
         if uuid
           values.each do |value|
-            activity = ActivityModel.from_json(value, name: name, scope: scope)
+            activity = ActivityModel.from_json(value, name: name, scope: scope, validate: false)
             return activity if activity.uuid == uuid
           end
         else
-          return ActivityModel.from_json(values[0], name: name, scope: scope)
+          return ActivityModel.from_json(values[0], name: name, scope: scope, validate: false)
         end
       end
       return nil
@@ -96,7 +96,7 @@ module OpenC3
         activity = self.score(name: name, score: score, scope: scope)
         if activity and activity.recurring['end'] and activity.recurring['uuid']
           json = Store.zrangebyscore("#{scope}#{PRIMARY_KEY}__#{name}", activity.recurring['start'], activity.recurring['end'])
-          parsed = json.map { |value| ActivityModel.from_json(value, name: name, scope: scope) }
+          parsed = json.map { |value| ActivityModel.from_json(value, name: name, scope: scope, validate: false) }
           parsed.each_with_index do |value, index|
             if value.recurring['uuid'] == uuid
               Store.zrem("#{scope}#{PRIMARY_KEY}__#{name}", json[index])
@@ -153,10 +153,12 @@ module OpenC3
     end
 
     # @return [ActivityModel] Model generated from the passed JSON
-    def self.from_json(json, name:, scope:)
+    # @param validate [Boolean] Validate the input like a new activity. Pass false when
+    #   loading stored activities whose start may already be in the past.
+    def self.from_json(json, name:, scope:, validate: true)
       json = JSON.parse(json, allow_nan: true, create_additions: true) if String === json
       raise "json data is nil" if json.nil?
-      self.new(**json.transform_keys(&:to_sym), name: name, scope: scope)
+      self.new(**json.transform_keys(&:to_sym), name: name, scope: scope, validate: validate)
     end
 
     attr_reader :start, :stop, :kind, :data, :fulfillment, :uuid, :events, :recurring
@@ -172,7 +174,8 @@ module OpenC3
       fulfillment: nil,
       uuid: nil,
       events: nil,
-      recurring: {}
+      recurring: {},
+      validate: true
     )
       super("#{scope}#{PRIMARY_KEY}__#{name}", name: name, scope: scope)
       # Validate everything that isn't already in Model
@@ -185,6 +188,7 @@ module OpenC3
         uuid: uuid,
         events: events,
         recurring: recurring,
+        validate: validate,
       )
       @updated_at = updated_at
     end
@@ -251,9 +255,9 @@ module OpenC3
     end
 
     # Set the values of the instance, @start, @kind, @data, @events...
-    def set_input(start:, stop:, kind: nil, data: nil, uuid: nil, events: nil, fulfillment: nil, recurring: nil)
+    def set_input(start:, stop:, kind: nil, data: nil, uuid: nil, events: nil, fulfillment: nil, recurring: nil, validate: true)
       kind = kind.to_s.downcase
-      validate_input(start: start, stop: stop, kind: kind, data: data)
+      validate_input(start: start, stop: stop, kind: kind, data: data) if validate
       @start = start
       @stop = stop
       @fulfillment = fulfillment.nil? ? false : fulfillment

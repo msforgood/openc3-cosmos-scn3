@@ -5,9 +5,10 @@ class CatalogTest < ScenarioTest
     housekeeping_fixture
   end
 
-  def test_published_catalog_has_three_ordered_scenarios_shared_by_both_targets
-    assert_equal %w[cs-crc-key-oracle tc-log-photo-traversal psp-mm-indirect-write],
+  def test_published_catalog_has_four_ordered_scenarios
+    assert_equal %w[cs-crc-key-oracle tc-log-photo-traversal psp-mm-indirect-write ground-station-tc-schedule],
                  @catalog.definitions.map { |item| item['id'] }
+    assert_equal ['INST'], @catalog.get('ground-station-tc-schedule')['supportedTargets']
     %w[CFS-1_QEMU CFS-1_BBB].each do |target|
       items = @catalog.definitions.select { |item| item['supportedTargets'].include?(target) }
       assert_equal %w[cs-crc-key-oracle tc-log-photo-traversal psp-mm-indirect-write],
@@ -114,5 +115,24 @@ class CatalogTest < ScenarioTest
     definition = @catalog.get('psp-mm-indirect-write')
     definition['steps'].pop
     assert_error('invalid_catalog') { validate(definition) }
+  end
+
+  def test_ground_station_schedule_is_pinned_to_inst
+    definition = @catalog.get('ground-station-tc-schedule')
+    changes = [
+      ->(d) { d['supportedTargets'] = ['CFS-1_QEMU'] },
+      ->(d) { d['supportedTargets'] = %w[INST INST2] },
+      ->(d) { d['steps'].reverse! },
+      ->(d) { d['telemetryItems'].pop },
+      ->(d) { d['timeoutSec'] = 120 }
+    ]
+    changes.each do |change|
+      candidate = JSON.parse(JSON.generate(definition))
+      change.call(candidate)
+      assert_raises(Scenario::Error) { Scenario::Catalog.new(definitions: [candidate]) }
+    end
+    psp = @catalog.get('psp-mm-indirect-write')
+    psp['supportedTargets'] = ['INST']
+    assert_raises(Scenario::Error) { Scenario::Catalog.new(definitions: [psp]) }
   end
 end

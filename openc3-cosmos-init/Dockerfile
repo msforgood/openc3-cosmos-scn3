@@ -18,6 +18,7 @@ COPY ./plugins/*.yaml ./
 COPY ./plugins/packages/openc3-tool-base/*.json packages/openc3-tool-base/
 COPY ./plugins/packages/openc3-cosmos-tool-admin/*.json packages/openc3-cosmos-tool-admin/
 COPY ./plugins/packages/openc3-cosmos-tool-bucketexplorer/*.json packages/openc3-cosmos-tool-bucketexplorer/
+COPY ./plugins/packages/openc3-cosmos-tool-calendar/*.json packages/openc3-cosmos-tool-calendar/
 COPY ./plugins/packages/openc3-cosmos-tool-cmdsender/*.json packages/openc3-cosmos-tool-cmdsender/
 COPY ./plugins/packages/openc3-cosmos-tool-cmdtlmserver/*.json packages/openc3-cosmos-tool-cmdtlmserver/
 COPY ./plugins/packages/openc3-cosmos-tool-dataextractor/*.json packages/openc3-cosmos-tool-dataextractor/
@@ -98,6 +99,10 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-mailbox"]
 COPY ./plugins/packages/openc3-cosmos-tool-limitsmonitor/ packages/openc3-cosmos-tool-limitsmonitor/
 RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-limitsmonitor"]
 
+# Build calendar tool
+COPY ./plugins/packages/openc3-cosmos-tool-calendar/ packages/openc3-cosmos-tool-calendar/
+RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-calendar"]
+
 # Build packetviewer tool
 COPY ./plugins/packages/openc3-cosmos-tool-packetviewer/ packages/openc3-cosmos-tool-packetviewer/
 RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-packetviewer"]
@@ -117,7 +122,8 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-scriptrunner
 
 # Build demo config
 COPY ./plugins/packages/openc3-cosmos-demo/ packages/openc3-cosmos-demo/
-RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-demo"]
+# INST command and telemetry changes require a new gem version for existing installations.
+RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-demo", "", "6.10.1.1"]
 
 FROM ${OPENC3_REGISTRY}/${OPENC3_NAMESPACE}/${OPENC3_BASE_IMAGE}:${OPENC3_TAG} AS base
 FROM openc3-frontend-tmp AS openc3-tmp5
@@ -133,7 +139,7 @@ RUN ["/openc3/plugins/docker-package-build.sh", "openc3-cosmos-tool-docs", "/ope
 
 # Scenario keeps its independent release version and procedure-only Ruby package.
 FROM openc3-frontend-tmp AS openc3-scenario
-ARG SCENARIO_VERSION=1.0.22
+ARG SCENARIO_VERSION=1.0.29
 COPY ./plugins/packages/openc3-cosmos-tool-scenariorunner/ packages/openc3-cosmos-tool-scenariorunner/
 RUN /openc3/plugins/docker-package-build.sh openc3-cosmos-tool-scenariorunner "" "${SCENARIO_VERSION}"
 COPY ./plugins/packages/openc3-cosmos-cfs-scenario-runner/ packages/openc3-cosmos-cfs-scenario-runner/
@@ -143,11 +149,12 @@ RUN cd packages/openc3-cosmos-cfs-scenario-runner \
   && ruby build_manifest.rb "${SCENARIO_VERSION}" /openc3/plugins/gems targets/SCENARIO_RUNNER/lib
 
 FROM ${OPENC3_REGISTRY}/${OPENC3_NAMESPACE}/${OPENC3_BASE_IMAGE}:${OPENC3_TAG}
-ARG SCENARIO_VERSION=1.0.22
+ARG SCENARIO_VERSION=1.0.29
 ENV SCENARIO_VERSION=${SCENARIO_VERSION}
 
 # System gems remain visible when the deployment mounts /gems and sets GEM_HOME.
 USER root
+RUN sed -i 's/\r$//' /openc3/bin/openc3cli /openc3/bin/pipinstall /openc3/bin/pipuninstall
 RUN apk add --no-cache sqlite-libs \
   && apk add --no-cache --virtual .scenario-sqlite-build sqlite-dev \
   && gem install sqlite3 --version 2.9.6 --platform ruby --no-document -- --enable-system-libraries \
@@ -169,7 +176,7 @@ COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plu
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/pnpm-lock.yaml /openc3/plugins/pnpm-lock.yaml
 COPY --from=openc3-frontend-tmp --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/pnpm-workspace.yaml /openc3/plugins/pnpm-workspace.yaml
 COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/gems/ /openc3/plugins/gems/
-COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./cfs-artifacts/openc3-cosmos-cfs-7.0.5.pre.all.2.gem /openc3/plugins/gems/
+COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./cfs-artifacts/openc3-cosmos-cfs-7.0.5.pre.all.3.gem /openc3/plugins/gems/
 # Installer support and catalog come from the same canonical procedure source.
 COPY --chown=${IMAGE_USER}:${IMAGE_GROUP} ./scenario/ /openc3/scenario/
 COPY --from=openc3-scenario --chown=${IMAGE_USER}:${IMAGE_GROUP} /openc3/plugins/packages/openc3-cosmos-cfs-scenario-runner/targets/SCENARIO_RUNNER/lib/scenarios.json /openc3/scenario/catalog/scenarios.json

@@ -20,6 +20,7 @@ RUN bundle config set --local without 'development test' \
 
 RUN ["chown", "-R", "openc3:openc3", "/src/"]
 COPY  --chown=${IMAGE_USER}:${IMAGE_GROUP} ./ ./
+RUN sed -i 's/\r$//' /src/bin/rails /src/bin/rake /src/bin/setup
 RUN ["chmod", "-R", "777", "/src/"]
 RUN ["chmod", "-R", "555", "/src/scripts"]
 

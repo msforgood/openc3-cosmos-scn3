@@ -6,7 +6,7 @@ const pspRequestId = '전송 시 생성 (32-bit REQUEST_ID)'
 const targetLogIndex = 'LAST_CLOSED_INDEX (seal-target 단계 결과)'
 const pointerSlot = 'POINTER_SLOT (map 단계 결과)'
 const bufferAddress = 'BUFFER_ADDRESS (baseline 단계 PAYLOAD_DATA_STATE)'
-const guardAddress = 'GUARD_ADDRESS (baseline 단계 PAYLOAD_DATA_STATE)'
+const codeAddress = 'MM_DEBUG_MAP.ADDRESS (map 단계 쓰기 금지 코드 영역)'
 
 const tc = (packet, parameters = {}) => ({ packet, parameters })
 const tcRequest = (packet, parameters) => tc(packet, { ...parameters, REQUEST_ID: tcRequestId })
@@ -34,18 +34,21 @@ const pspPlan = {
   pause: [tc('PAYLOAD_DATA_PAUSE_CMD')],
   'read-pointer': [pspDebug('MM_CMD_DEBUG_READ', { WIDTH_BYTES: 4, ADDRESS: pointerSlot })],
   'write-pointer': [pspDebug('MM_CMD_DEBUG_WRITE', {
-    WIDTH_BYTES: 4, ADDRESS: pointerSlot, VALUE: guardAddress, RESERVED: 0,
+    WIDTH_BYTES: 4, ADDRESS: pointerSlot, VALUE: codeAddress, RESERVED: 0,
   })],
   'verify-pointer': [pspDebug('MM_CMD_DEBUG_READ', { WIDTH_BYTES: 4, ADDRESS: pointerSlot })],
   resume: [tc('PAYLOAD_DATA_RESUME_CMD')],
   'confirm-sigsegv': [],
 }
 
+
 /** A null result means an unrecognised step, not a verified read-only step. */
 export function stepCommandPlan(step) {
   if (step.type === 'command') return [tc(step.packet, step.parameters || {})]
   if (step.type === 'tcLogPhase') return tcLogPlan[step.phase] || null
   if (step.type === 'pspPhase') return pspPlan[step.phase] || null
+  // The sequence TCs are sent later by the Calendar, not by the scenario itself.
+  if (step.type === 'schedulePhase') return []
   if (step.type === 'crcByte') return [tc('CS_CMD_ONE_SHOT', {
     ADDRESS: `XKEY_HK.KEY_ADDRESS (locate-key 단계 결과) + ${step.offset}`,
     SIZE: 1, MAX_BYTES_PER_CYCLE: 1,

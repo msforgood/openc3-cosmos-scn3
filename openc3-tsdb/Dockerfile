@@ -20,7 +20,7 @@ RUN if [ "$OPENC3_TSDB_VERSION_EXT" = "" ]; then \
   apt-get update; \
   apt-get -y upgrade; \
   # Remove gosu to eliminate a ton of CVEs
-  rm /usr/local/bin/gosu; \
+  rm -f /usr/local/bin/gosu; \
   fi
 COPY --chmod=0755 ./docker-entrypoint.sh /docker-entrypoint.sh
 

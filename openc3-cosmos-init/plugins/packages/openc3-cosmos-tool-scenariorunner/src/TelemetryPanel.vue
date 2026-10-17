@@ -10,7 +10,7 @@
       <option v-for="name in screens" :key="name" :value="name">{{ name }}</option>
     </select>
     <p v-if="error" role="alert" class="error-text">{{ error }}</p>
-    <p v-if="!screens.length && !error" class="empty">이 대상에 설치된 텔레메트리 화면이 없습니다.</p>
+    <p v-if="!screens.length && !error" class="empty">{{ allowedScreens ? '이 시나리오에 표시할 텔레메트리 화면이 없습니다.' : '이 대상에 설치된 텔레메트리 화면이 없습니다.' }}</p>
     <TelemetryOverview v-if="definition" :target="target" :screen="screen" :rows="overviewRows" :total="selectedItems.total"
       :limits-set="limitsSet" :metadata-error="metadataError" />
     <div v-if="definition" class="screen-container">
@@ -43,8 +43,10 @@ import { preferredScreen, validatePassiveScreen } from './passiveScreen.js'
 import TelemetryOverview from './TelemetryOverview.vue'
 import { appendSample, displayValue, itemKey, itemLimits, itemStatus, limitsGauge, METADATA_INTERVAL, overviewItems, sampleTrend, telemetryPair } from './telemetryOverview.js'
 
-const props = defineProps({ target: { type: String, default: '' }, scope: { type: String, required: true }, telemetryItems: { type: Array, default: () => [] } })
-const screens = ref([]), screen = ref(''), definition = ref(''), keywords = ref([]), error = ref('')
+const props = defineProps({ target: { type: String, default: '' }, scope: { type: String, required: true }, telemetryItems: { type: Array, default: () => [] }, allowedScreens: { type: Array, default: null } })
+const installedScreens = ref([]), screen = ref(''), definition = ref(''), keywords = ref([]), error = ref('')
+const screens = computed(() => props.allowedScreens === null ? installedScreens.value :
+  props.allowedScreens.filter((name) => installedScreens.value.includes(name)))
 const events = ref([]), limitsConnected = ref(false), connected = ref(null), lastReceipt = ref(null), lastSuccess = ref(null)
 const freshnessReceipt = ref(null), screenRef = ref(null)
 const validatedPackets = ref([])
@@ -91,7 +93,7 @@ watch(() => [props.target, props.scope], async ([target, scope]) => {
   const id = ++generation
   ++screenGeneration
   const current = () => !disposed && id === generation
-  screens.value = []; screen.value = ''; definition.value = ''; validatedPackets.value = []; events.value = []; error.value = ''
+  installedScreens.value = []; screen.value = ''; definition.value = ''; validatedPackets.value = []; events.value = []; error.value = ''
   validatedItems.value = []; clearOverview()
   connected.value = null; limitsConnected.value = false; lastReceipt.value = null; freshnessReceipt.value = null; lastSuccess.value = null
   if (!target) return
@@ -171,7 +173,7 @@ watch(() => [props.target, props.scope], async ([target, scope]) => {
     ])
     if (!current()) return
     keywords.value = hints.data
-    screens.value = [...new Set(list.data.filter((path) => path.split('/')[0] === target)
+    installedScreens.value = [...new Set(list.data.filter((path) => path.split('/')[0] === target)
       .map((path) => path.split('/').at(-1).replace(/\.[^.]+$/, '').toUpperCase()))].sort()
     screen.value = preferredScreen(screens.value, props.telemetryItems)
   } catch (cause) { if (current()) error.value = `텔레메트리 화면을 불러오지 못했습니다: ${errorMessage(cause)}` }
@@ -194,13 +196,13 @@ watch(screen, async (name) => {
     screenRevision.value++
   } catch (cause) { if (!disposed && id === screenGeneration) error.value = `화면을 불러오지 못했습니다: ${errorMessage(cause)}` }
 }, { flush: 'sync' })
-watch(() => props.telemetryItems, (items) => {
-  const next = preferredScreen(screens.value, items)
+watch([screens, () => props.telemetryItems], ([available, items]) => {
+  const next = preferredScreen(available, items)
   if (screen.value === next) { ++overviewGeneration; clearOverview() }
   else screen.value = next
-}, { flush: 'sync' })
+}, { flush: 'post' })
 
-// Existing screen navigation stays inside the selected target's installed screens.
+// Screen navigation stays inside the selected target and scenario's visible screens.
 function showScreen(target, name) { if (target === props.target && screens.value.includes(name)) screen.value = name }
 function closeScreenByName() { definition.value = '' }
 function closeAll() { definition.value = '' }

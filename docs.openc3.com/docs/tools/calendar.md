@@ -1,5 +1,5 @@
 ---
-title: Calendar (Enterprise)
+title: Calendar
 description: Calendar visualization of metadata, notes, and timelines
 sidebar_custom_props:
   myEmoji: 🗓️
@@ -85,5 +85,9 @@ The main thread will block on the web socket to listen to request changes to the
 The schedule thread checks every second to make sure if a task can be run. If the start time is equal or less then the last 15 seconds it will then check the previously queued jobs list in the schedule. If the activity has not been queued and is not fulfilled the activity will be queued, this adds an event to the activity but is not saved to the database.
 
 The workers block on the queue until an activity is placed on the queue. Once a job is pulled from the queue they check the type and run the activity. The thread will mark the activity fulfillment true and update the database record with the complete. If the worker gets an error while trying to run the task the activity will NOT be fulfilled and record the error in the database.
+
+Execution can be enabled or disabled per timeline. When a timeline's execution is disabled, activities are still queued but are recorded with a `disabled` event instead of running.
+
+Script activities record a `started` event (with the running script id) once Script Runner accepts the script. A script monitor thread in the timeline microservice then follows the running script and commits an event to the activity each time the script changes state: `running`, `paused`, `breakpoint`, `error`, `stopped`, `killed`, `crashed`, `completed` or `completed_errors`. Command activities record `completed` or `failed`.
 
 ![Timeline Lifecycle](/img/calendar/timeline_lifecycle.png)

@@ -139,7 +139,7 @@ module OpenC3
         name: @name,
         folder_name: nil,
         cmd: ['ruby', 'timeline_microservice.rb', @name],
-        work_dir: '/openc3-enterprise/lib/openc3-enterprise/microservices',
+        work_dir: '/openc3/lib/openc3/microservices',
         options: [],
         topics: topics,
         target_names: [],

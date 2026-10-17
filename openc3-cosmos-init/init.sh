@@ -167,6 +167,9 @@ fi
 if [ -z $OPENC3_NO_TABLEMANAGER ]; then
     ruby /openc3/bin/openc3cli load /openc3/plugins/gems/openc3-cosmos-tool-tablemanager-*.gem || exit 1
 fi
+if [ -z $OPENC3_NO_CALENDAR ]; then
+    ruby /openc3/bin/openc3cli load /openc3/plugins/gems/openc3-cosmos-tool-calendar-*.gem || exit 1
+fi
 if [ -z $OPENC3_NO_BUCKETEXPLORER ]; then
     ruby /openc3/bin/openc3cli load /openc3/plugins/gems/openc3-cosmos-tool-bucketexplorer-*.gem || exit 1
 fi
